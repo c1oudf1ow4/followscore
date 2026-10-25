@@ -1,0 +1,5167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="description" content="上传乐谱图片，在大画布中读谱，并用右侧节拍器练习。支持单页阅读、多页同时拼放与自由拖动、缩放和快捷键。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231d211b'/%3E%3Cpath d='M11 25 16 7l5 18' fill='none' stroke='%23f2eddf' stroke-width='1.8' stroke-linejoin='round'/%3E%3Cpath d='m16 11 4 8' stroke='%23e0714d' stroke-width='1.8' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='19' r='1.5' fill='%23e0714d'/%3E%3C/svg%3E">
+<title>随谱 · 乐谱与节拍器</title>
+<style>
+  :root {
+    --bg: #e9e3d7;
+    --surface: #fbf8f1;
+    --surface-soft: #f4f0e7;
+    --ink: #24261f;
+    --ink-soft: #45473d;
+    --muted: #7c7a6d;
+    --line: rgba(36, 38, 31, .12);
+    --line-strong: rgba(36, 38, 31, .2);
+    --accent: #c25433;
+    --accent-deep: #a94326;
+    --accent-light: #e0714d;
+    --panel: #1d211b;
+    --panel-2: #252a22;
+    --cream: #f2eddf;
+    --cream-dim: #b6b1a2;
+    --panel-line: rgba(242, 237, 223, .12);
+    --font-ui: "Segoe UI Variable", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", "Songti SC", "STSong", "SimSun", Georgia, serif;
+    --font-num: "Bahnschrift", "DIN Alternate", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    --sidebar: clamp(334px, 25.5vw, 376px);
+    --radius-lg: 21px;
+    --shadow-panel: 0 24px 64px -38px rgba(45, 40, 29, .6), 0 1px 0 rgba(255, 255, 255, .75) inset;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    overflow: hidden;
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(1100px 720px at 8% -10%, rgba(255, 253, 247, .88), transparent 62%),
+      radial-gradient(1000px 700px at 104% 106%, rgba(182, 157, 116, .2), transparent 58%),
+      linear-gradient(135deg, #ece6da 0%, #e7e1d4 100%);
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+    opacity: .16;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
+    mix-blend-mode: multiply;
+  }
+  button, input { font: inherit; }
+  button { color: inherit; }
+  button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+  button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    font-family: var(--font-ui);
+    font-size: 9.5px;
+    line-height: 1;
+    font-weight: 600;
+    opacity: .62;
+  }
+  svg { display: block; }
+
+  .app {
+    position: relative;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    isolation: isolate;
+  }
+
+  /* ── Top bar ───────────────────────────────────────────── */
+  .topbar {
+    flex: 0 0 68px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px 0 24px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(249, 245, 237, .72);
+    backdrop-filter: blur(18px) saturate(1.25);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25);
+    position: relative;
+    z-index: 20;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex: 0 0 auto;
+  }
+  .brand-mark {
+    width: 37px;
+    height: 37px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    color: var(--cream);
+    background:
+      radial-gradient(120% 120% at 95% 0%, rgba(224, 113, 77, .34), transparent 52%),
+      linear-gradient(145deg, #2d3128, #1c201a);
+    border: 1px solid rgba(255, 255, 255, .1);
+    box-shadow: 0 6px 16px -9px rgba(26, 28, 22, .9), 0 1px 0 rgba(255, 255, 255, .1) inset;
+  }
+  .brand-text { display: flex; flex-direction: column; gap: 1px; }
+  .brand-name {
+    font-size: 16px;
+    font-weight: 680;
+    letter-spacing: .12em;
+    line-height: 1.2;
+  }
+  .brand-sub {
+    color: var(--muted);
+    font-size: 8px;
+    letter-spacing: .23em;
+    font-weight: 650;
+    line-height: 1.2;
+  }
+  .topbar-rule {
+    flex: 0 0 1px;
+    height: 28px;
+    background: var(--line);
+    margin-left: 2px;
+  }
+  .clear-btn {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    margin-left: -4px;
+    color: #918d7e;
+  }
+  .file-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 12px;
+  }
+  .file-title {
+    font-size: 12.5px;
+    font-weight: 620;
+    line-height: 1.35;
+    letter-spacing: .01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 370px;
+  }
+  .file-sub {
+    font-size: 10.5px;
+    color: var(--muted);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 370px;
+  }
+  .topbar-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+  .btn {
+    appearance: none;
+    border: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 12px;
+    font-weight: 600;
+    transition: background .18s var(--ease), color .18s var(--ease), transform .18s var(--ease), opacity .18s var(--ease);
+  }
+  .btn:hover { background: rgba(36, 38, 31, .065); color: var(--ink); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .4; cursor: default; transform: none; }
+  .btn kbd { margin-left: 1px; }
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 9px;
+    color: var(--muted);
+  }
+  .icon-btn:hover { color: var(--ink); background: rgba(36, 38, 31, .065); }
+  .help-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    background: rgba(255, 255, 255, .35);
+    transition: .18s var(--ease);
+  }
+  .help-btn:hover { border-color: var(--line-strong); color: var(--ink); background: rgba(255, 255, 255, .65); }
+  .upload-btn {
+    height: 38px;
+    padding: 0 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(24, 26, 21, .55);
+    color: var(--cream);
+    background: linear-gradient(160deg, #30342b, #1e211b);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .13) inset, 0 7px 18px -11px rgba(26, 28, 22, .9);
+    font-size: 12.5px;
+    font-weight: 620;
+    letter-spacing: .01em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: transform .18s var(--ease), box-shadow .18s var(--ease), opacity .18s var(--ease), background .18s var(--ease);
+  }
+  .upload-btn:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(160deg, #393d33, #262a22);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 10px 22px -12px rgba(26, 28, 22, .95);
+  }
+  .upload-btn:active { transform: translateY(0); }
+  .upload-btn:disabled { opacity: .65; cursor: wait; transform: none; }
+  .upload-btn .upload-icon { color: #e58a6c; }
+
+  /* ── Main layout ───────────────────────────────────────── */
+  .main {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 1920px;
+    margin: 0 auto;
+    padding: 18px 20px 20px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--sidebar);
+    gap: 18px;
+  }
+  .score-pane {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    background: var(--surface-soft);
+    box-shadow: var(--shadow-panel);
+  }
+  .score-stage { position: absolute; inset: 0; }
+
+  .score-viewport {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    touch-action: none;
+    cursor: grab;
+    background-color: #f3efe5;
+    background-image:
+      radial-gradient(circle at center, rgba(57, 53, 42, .15) .65px, transparent .85px),
+      radial-gradient(ellipse at 50% 40%, rgba(255, 255, 255, .52), transparent 68%);
+    background-size: 19px 19px, 100% 100%;
+    box-shadow: inset 0 0 90px rgba(84, 72, 50, .06);
+  }
+  .score-viewport:active { cursor: grabbing; }
+  .score-viewport.is-panning { cursor: grabbing; }
+  .score-paper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+    background: #fffefb;
+    line-height: 0;
+    box-shadow:
+      0 1px 2px rgba(32, 29, 22, .12),
+      0 18px 45px -18px rgba(45, 38, 25, .42),
+      0 44px 90px -50px rgba(45, 38, 25, .5);
+  }
+  .app:not(.has-score) .score-paper {
+    display: none;
+  }
+  .score-paper img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+  .score-paper::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(30, 28, 22, .05);
+  }
+
+  /* ── Free arrangement canvas ───────────────────────────── */
+  .free-canvas {
+    position: absolute;
+    inset: 0;
+    display: none;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  .app.free-mode .free-canvas { display: block; }
+  .app.free-mode .score-paper { display: none; }
+  .app:not(.has-score) .free-canvas { display: none; }
+  .free-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    line-height: 0;
+    cursor: grab;
+    user-select: none;
+    background: #fffefb;
+    will-change: transform;
+    box-shadow:
+      0 1px 2px rgba(32, 29, 22, .1),
+      0 12px 28px -16px rgba(45, 38, 25, .4);
+    transition: box-shadow .18s var(--ease);
+  }
+  .free-sheet img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+  .free-sheet::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(30, 28, 22, .05);
+    transition: box-shadow .18s var(--ease);
+  }
+  .free-sheet:hover {
+    box-shadow:
+      0 1px 2px rgba(32, 29, 22, .1),
+      0 18px 38px -18px rgba(45, 38, 25, .48);
+  }
+  .free-sheet:hover::after {
+    box-shadow: inset 0 0 0 2px rgba(194, 84, 51, .32);
+  }
+  .free-sheet.is-dragging {
+    cursor: grabbing;
+    box-shadow:
+      0 2px 4px rgba(32, 29, 22, .12),
+      0 30px 55px -24px rgba(45, 38, 25, .56);
+  }
+  .free-sheet.is-dragging::after {
+    box-shadow: inset 0 0 0 2px rgba(194, 84, 51, .56);
+  }
+  .score-viewport.is-sheet-dragging,
+  .score-viewport.is-sheet-dragging .free-sheet { cursor: grabbing; }
+
+  /* ── Empty state ───────────────────────────────────────── */
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    transition: opacity .28s var(--ease), visibility .28s var(--ease);
+  }
+  .app.has-score .empty-state {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .empty-card {
+    position: relative;
+    width: min(608px, 94%);
+    padding: 44px 42px 29px;
+    text-align: center;
+    border: 1px dashed rgba(78, 70, 54, .26);
+    border-radius: 27px;
+    background: rgba(252, 249, 242, .68);
+    box-shadow: 0 26px 70px -55px rgba(48, 41, 26, .5), 0 1px 0 rgba(255, 255, 255, .9) inset;
+    backdrop-filter: blur(5px);
+    overflow: hidden;
+  }
+  .empty-card::before {
+    content: "";
+    position: absolute;
+    left: 26px;
+    right: 26px;
+    top: 0;
+    height: 64px;
+    pointer-events: none;
+    opacity: .6;
+    background: repeating-linear-gradient(to bottom, transparent 0 9px, rgba(45, 40, 30, .055) 9px 10px);
+    -webkit-mask-image: linear-gradient(to bottom, #000, transparent 92%);
+    mask-image: linear-gradient(to bottom, #000, transparent 92%);
+  }
+  .empty-card::after {
+    content: "";
+    position: absolute;
+    left: 26px;
+    right: 26px;
+    bottom: 0;
+    height: 52px;
+    pointer-events: none;
+    opacity: .45;
+    background: repeating-linear-gradient(to bottom, transparent 0 9px, rgba(45, 40, 30, .05) 9px 10px);
+    -webkit-mask-image: linear-gradient(to top, #000, transparent 92%);
+    mask-image: linear-gradient(to top, #000, transparent 92%);
+  }
+  .empty-mark {
+    position: relative;
+    z-index: 1;
+    width: 75px;
+    height: 75px;
+    margin: 0 auto 20px;
+    border-radius: 22px;
+    display: grid;
+    place-items: center;
+    color: var(--ink);
+    background: linear-gradient(145deg, #fffef9, #f4ede0);
+    border: 1px solid rgba(58, 51, 37, .14);
+    box-shadow: 0 13px 26px -19px rgba(45, 38, 25, .65), 0 1px 0 #fff inset;
+  }
+  .empty-mark::after {
+    content: "";
+    position: absolute;
+    right: -5px;
+    top: -5px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid #f7f2e8;
+    box-shadow: 0 3px 10px -3px rgba(162, 67, 38, .55);
+  }
+  .empty-kicker {
+    position: relative;
+    z-index: 1;
+    margin: 0 0 10px;
+    color: var(--accent-deep);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .25em;
+    text-transform: uppercase;
+  }
+  .empty-card h1 {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(29px, 2.75vw, 37px);
+    font-weight: 500;
+    letter-spacing: .055em;
+    line-height: 1.22;
+  }
+  .empty-desc {
+    position: relative;
+    z-index: 1;
+    max-width: 400px;
+    margin: 12px auto 24px;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.8;
+    letter-spacing: .015em;
+  }
+  .empty-upload-btn {
+    position: relative;
+    z-index: 1;
+    height: 44px;
+    padding: 0 21px;
+    border: 1px solid rgba(143, 55, 29, .4);
+    border-radius: 11px;
+    background: linear-gradient(155deg, #cf603d, var(--accent-deep));
+    color: #fff9f3;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset, 0 10px 25px -13px rgba(153, 59, 33, .95);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .015em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    cursor: pointer;
+    transition: transform .18s var(--ease), box-shadow .18s var(--ease), filter .18s var(--ease);
+  }
+  .empty-upload-btn:hover {
+    transform: translateY(-1px);
+    filter: saturate(1.06) brightness(1.03);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 14px 29px -14px rgba(153, 59, 33, 1);
+  }
+  .empty-upload-btn:active { transform: translateY(0); }
+  .empty-upload-btn:disabled { cursor: wait; opacity: .72; }
+  .empty-chips {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 7px;
+    margin-top: 22px;
+  }
+  .empty-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 25px;
+    padding: 0 9px;
+    border: 1px solid rgba(64, 57, 43, .11);
+    border-radius: 99px;
+    background: rgba(255, 253, 247, .56);
+    color: #777363;
+    font-size: 10px;
+    letter-spacing: .01em;
+    white-space: nowrap;
+  }
+  .empty-chip svg { opacity: .7; }
+  .empty-chip kbd { height: 15px; min-width: 15px; padding: 0 4px; font-size: 8.5px; opacity: .65; }
+  .drop-tip {
+    position: relative;
+    z-index: 1;
+    margin: 17px 0 0;
+    color: #979181;
+    font-size: 10.5px;
+    letter-spacing: .03em;
+  }
+
+  /* ── Floating viewer toolbar ───────────────────────────── */
+  .viewer-toolbar {
+    position: absolute;
+    z-index: 6;
+    left: 50%;
+    bottom: 22px;
+    transform: translate(-50%, 9px);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid rgba(56, 50, 38, .14);
+    background: rgba(252, 249, 242, .91);
+    box-shadow: 0 15px 40px -22px rgba(48, 41, 26, .7), 0 1px 0 rgba(255, 255, 255, .9) inset;
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .22s var(--ease), transform .22s var(--ease), visibility .22s;
+    white-space: nowrap;
+  }
+  .app.has-score .viewer-toolbar {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+  }
+  .page-block {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .mode-switch {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid rgba(56, 50, 38, .07);
+    border-radius: 9px;
+    background: rgba(36, 38, 31, .045);
+  }
+  .mode-btn {
+    height: 27px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #8b8779;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9.5px;
+    font-weight: 620;
+    letter-spacing: .03em;
+    cursor: pointer;
+    transition: background .16s var(--ease), color .16s var(--ease), box-shadow .16s var(--ease);
+  }
+  .mode-btn svg { opacity: .66; }
+  .mode-btn:hover { color: var(--ink); background: rgba(255, 255, 255, .46); }
+  .mode-btn.is-active {
+    color: var(--ink);
+    background: #fffdf7;
+    box-shadow: 0 1px 4px rgba(48, 41, 26, .1), 0 0 0 1px rgba(56, 50, 38, .055);
+  }
+  .mode-btn.is-active svg { opacity: .88; color: var(--accent-deep); }
+  .free-block {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .tool-btn {
+    width: 31px;
+    height: 31px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #555548;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: background .16s var(--ease), color .16s var(--ease), opacity .16s var(--ease);
+  }
+  .tool-btn:hover { background: rgba(36, 38, 31, .07); color: var(--ink); }
+  .tool-btn:disabled { opacity: .28; cursor: default; background: transparent; }
+  .tool-btn.tool-wide {
+    width: auto;
+    padding: 0 8px;
+    display: inline-flex;
+    gap: 5px;
+    font-size: 9.5px;
+    font-weight: 620;
+    letter-spacing: .03em;
+  }
+  .toolbar-divider {
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--line);
+    flex: 0 0 auto;
+  }
+  .page-counter {
+    min-width: 46px;
+    padding: 0 3px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .04em;
+  }
+  .page-counter strong { color: var(--ink); font-weight: 680; font-size: 11px; }
+  .zoom-label {
+    width: 42px;
+    text-align: center;
+    color: #5d5b4f;
+    font-family: var(--font-num);
+    font-size: 10.5px;
+    letter-spacing: .02em;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+  .viewer-toolbar .toolbar-hint {
+    margin: 0 6px 0 8px;
+    color: #9a9587;
+    font-size: 9px;
+    letter-spacing: .04em;
+  }
+  .stage-hint {
+    position: absolute;
+    z-index: 5;
+    top: 18px;
+    left: 50%;
+    transform: translate(-50%, -5px);
+    padding: 7px 12px;
+    border: 1px solid rgba(56, 50, 38, .1);
+    border-radius: 99px;
+    color: #807b6b;
+    background: rgba(252, 249, 242, .76);
+    box-shadow: 0 8px 25px -20px rgba(48, 41, 26, .7);
+    backdrop-filter: blur(10px);
+    font-size: 9.5px;
+    letter-spacing: .04em;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .3s var(--ease), transform .3s var(--ease), visibility .3s;
+  }
+  .stage-hint.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+  }
+  .focus-exit {
+    position: fixed;
+    z-index: 40;
+    top: 16px;
+    right: 18px;
+    height: 35px;
+    padding: 0 12px;
+    border: 1px solid rgba(242, 237, 223, .18);
+    border-radius: 9px;
+    color: var(--cream);
+    background: rgba(24, 27, 22, .72);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px -12px rgba(0, 0, 0, .5);
+    display: none;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .focus-exit:hover { background: rgba(39, 43, 35, .9); }
+  .focus-exit kbd { border-color: rgba(242, 237, 223, .35); }
+
+  /* ── Metronome panel ───────────────────────────────────── */
+  .metro {
+    position: relative;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 22px 16px;
+    border-radius: var(--radius-lg);
+    color: var(--cream);
+    border: 1px solid rgba(255, 255, 255, .075);
+    background:
+      radial-gradient(450px 280px at 104% -6%, rgba(207, 96, 56, .16), transparent 62%),
+      radial-gradient(380px 300px at -15% 105%, rgba(163, 156, 125, .07), transparent 65%),
+      linear-gradient(158deg, #242920 0%, #1b1f19 58%, #191c17 100%);
+    box-shadow:
+      0 28px 70px -38px rgba(20, 23, 17, .88),
+      0 1px 0 rgba(255, 255, 255, .09) inset,
+      0 0 0 1px rgba(20, 23, 17, .12);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(242, 237, 223, .18) transparent;
+  }
+  .metro::-webkit-scrollbar { width: 6px; }
+  .metro::-webkit-scrollbar-track { background: transparent; }
+  .metro::-webkit-scrollbar-thumb { background: rgba(242, 237, 223, .16); border-radius: 9px; }
+  .metro-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 0 0 auto;
+  }
+  .metro-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--cream-dim);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .24em;
+    white-space: nowrap;
+  }
+  .metro-eyebrow::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent-light);
+  }
+  .metro-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 23px;
+    padding: 0 9px;
+    border: 1px solid var(--panel-line);
+    border-radius: 99px;
+    color: var(--cream-dim);
+    background: rgba(255, 255, 255, .035);
+    font-size: 9.5px;
+    letter-spacing: .04em;
+    white-space: nowrap;
+    transition: color .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+  }
+  .status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(242, 237, 223, .35);
+    transition: background .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .metro.is-playing .metro-status {
+    color: #f6c7b6;
+    border-color: rgba(224, 113, 77, .22);
+    background: rgba(224, 113, 77, .075);
+  }
+  .metro.is-playing .status-dot {
+    background: var(--accent-light);
+    box-shadow: 0 0 0 3px rgba(224, 113, 77, .13);
+    animation: statusPulse 1.05s ease-in-out infinite;
+  }
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 3px rgba(224, 113, 77, .11); }
+    50% { opacity: .62; box-shadow: 0 0 0 5px rgba(224, 113, 77, .04); }
+  }
+
+  .tempo-block { position: relative; flex: 0 0 auto; margin-top: 17px; }
+  .tempo-word {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 17px;
+    color: var(--cream-dim);
+    font-size: 11px;
+    letter-spacing: .05em;
+  }
+  .tempo-word .tempo-it {
+    color: rgba(242, 237, 223, .48);
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 11.5px;
+    letter-spacing: .02em;
+  }
+  .tempo-word .tempo-dot { color: rgba(242, 237, 223, .24); font-size: 10px; }
+  .bpm-display {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    margin-top: 0;
+    line-height: 1;
+    user-select: none;
+  }
+  .bpm-number {
+    display: inline-block;
+    color: var(--cream);
+    font-family: var(--font-num);
+    font-size: clamp(68px, 9.2vh, 96px);
+    font-weight: 500;
+    line-height: .96;
+    letter-spacing: -.045em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 9px 30px rgba(0, 0, 0, .16);
+    transform-origin: 20% 60%;
+  }
+  .bpm-number.is-pulsing { animation: bpmPulse .24s var(--ease); }
+  @keyframes bpmPulse {
+    0% { transform: translateY(0); color: var(--cream); }
+    45% { transform: translateY(-2px); color: #ffd5c4; }
+    100% { transform: translateY(0); color: var(--cream); }
+  }
+  .bpm-unit {
+    color: var(--cream-dim);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .18em;
+    transform: translateY(-2px);
+  }
+  .bpm-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .step-btn {
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--panel-line);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .035);
+    color: var(--cream-dim);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: .17s var(--ease);
+  }
+  .step-btn:hover { color: var(--cream); background: rgba(255, 255, 255, .08); border-color: rgba(242, 237, 223, .2); }
+  .step-btn:active { transform: scale(.94); }
+  .range {
+    --fill: 50%;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 24px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 99px;
+    background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill), rgba(242, 237, 223, .14) var(--fill), rgba(242, 237, 223, .14) 100%);
+  }
+  .range::-moz-range-track {
+    height: 4px;
+    border-radius: 99px;
+    background: rgba(242, 237, 223, .14);
+  }
+  .range::-moz-range-progress {
+    height: 4px;
+    border-radius: 99px;
+    background: var(--accent);
+  }
+  .range::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    margin-top: -5.5px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--cream);
+    box-shadow: 0 0 0 3px rgba(194, 84, 51, .2), 0 2px 7px rgba(0, 0, 0, .38);
+    transition: box-shadow .16s var(--ease), transform .16s var(--ease);
+  }
+  .range:hover::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(224, 113, 77, .24), 0 2px 8px rgba(0, 0, 0, .4); }
+  .range:active::-webkit-slider-thumb { transform: scale(1.08); }
+  .range::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--cream);
+    box-shadow: 0 0 0 3px rgba(194, 84, 51, .2), 0 2px 7px rgba(0, 0, 0, .38);
+  }
+  .bpm-slider { flex: 1 1 auto; min-width: 0; }
+  .bpm-range-labels {
+    display: flex;
+    justify-content: space-between;
+    margin: -2px 2px 0 34px;
+    color: rgba(242, 237, 223, .3);
+    font-family: var(--font-num);
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    pointer-events: none;
+  }
+  .preset-row {
+    display: flex;
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .preset {
+    flex: 1 1 0;
+    height: 25px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, .035);
+    color: rgba(242, 237, 223, .53);
+    font-family: var(--font-num);
+    font-size: 10px;
+    letter-spacing: .045em;
+    cursor: pointer;
+    transition: .17s var(--ease);
+  }
+  .preset:hover { color: var(--cream); background: rgba(255, 255, 255, .075); }
+  .preset.is-active {
+    color: var(--cream);
+    background: rgba(242, 237, 223, .105);
+    border-color: rgba(242, 237, 223, .13);
+  }
+
+  /* Pendulum */
+  .swing-section {
+    position: relative;
+    flex: 0 0 auto;
+    height: 103px;
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .swing-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 88px;
+  }
+  .swing-svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+  .swing-arc { fill: none; stroke: rgba(242, 237, 223, .12); stroke-width: 1; }
+  .swing-tick { stroke: rgba(242, 237, 223, .22); stroke-width: 1; stroke-linecap: round; }
+  .swing-tick.major { stroke: rgba(242, 237, 223, .38); }
+  .swing-label {
+    fill: rgba(242, 237, 223, .25);
+    font-family: var(--font-ui);
+    font-size: 7px;
+    font-weight: 650;
+    letter-spacing: .16em;
+  }
+  .swing-pivot { fill: rgba(242, 237, 223, .48); }
+  .swing-pivot-inner { fill: var(--accent-light); }
+  .pendulum-arm {
+    transform-box: view-box;
+    transform-origin: 150px 91px;
+    transition: transform var(--swing-ms, 520ms) cubic-bezier(.37, .02, .63, .98);
+  }
+  .pendulum-stem {
+    stroke: rgba(242, 237, 223, .67);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+  }
+  .pendulum-weight {
+    fill: var(--accent-light);
+    filter: drop-shadow(0 0 5px rgba(224, 113, 77, .42));
+  }
+  .pendulum-weight-ring { fill: none; stroke: rgba(224, 113, 77, .35); stroke-width: 1; }
+  .beat-dots {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 17px;
+    margin-top: 0;
+  }
+  .beat-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(242, 237, 223, .18);
+    transition: transform .12s var(--ease), background .12s var(--ease), box-shadow .12s var(--ease);
+  }
+  .beat-dot.is-accent { width: 6px; height: 6px; background: rgba(242, 237, 223, .28); }
+  .beat-dot.group-start { margin-left: 11px; position: relative; }
+  .beat-dot.group-start::before {
+    content: "";
+    position: absolute;
+    left: -9px;
+    top: 50%;
+    width: 1px;
+    height: 8px;
+    transform: translateY(-50%);
+    background: rgba(242, 237, 223, .12);
+  }
+  .beat-dot.is-active {
+    background: var(--accent-light);
+    box-shadow: 0 0 0 4px rgba(224, 113, 77, .1), 0 0 14px rgba(224, 113, 77, .3);
+    transform: scale(1.45);
+  }
+  .beat-dot.is-active.is-accent { background: #ffb08f; }
+
+  /* Controls */
+  .metro-controls {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 9px;
+  }
+  .control-block { display: flex; flex-direction: column; gap: 6px; }
+  .control-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 13px;
+    color: rgba(242, 237, 223, .4);
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+  }
+  .control-head .control-value {
+    font-family: var(--font-num);
+    font-size: 9.5px;
+    letter-spacing: .02em;
+    color: rgba(242, 237, 223, .55);
+  }
+  .meter-options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid rgba(242, 237, 223, .075);
+    border-radius: 9px;
+    background: rgba(0, 0, 0, .12);
+  }
+  .meter-btn {
+    height: 27px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(242, 237, 223, .47);
+    font-family: var(--font-num);
+    font-size: 10.5px;
+    letter-spacing: .045em;
+    cursor: pointer;
+    transition: .17s var(--ease);
+  }
+  .meter-btn:hover { color: var(--cream); background: rgba(255, 255, 255, .06); }
+  .meter-btn.is-active {
+    color: #26291f;
+    background: var(--cream);
+    font-weight: 650;
+    box-shadow: 0 2px 7px rgba(0, 0, 0, .2);
+  }
+  .volume-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 22px;
+    color: rgba(242, 237, 223, .4);
+  }
+  .volume-row .range { flex: 1; height: 22px; }
+  .volume-row .range::-webkit-slider-runnable-track {
+    height: 3px;
+    background: linear-gradient(to right, rgba(224, 113, 77, .85) 0%, rgba(224, 113, 77, .85) var(--fill), rgba(242, 237, 223, .13) var(--fill), rgba(242, 237, 223, .13) 100%);
+  }
+  .volume-row .range::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4.5px; }
+  .volume-row .range::-moz-range-thumb { width: 12px; height: 12px; }
+
+  /* Actions */
+  .metro-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 7px;
+    margin-top: auto;
+    padding-top: 16px;
+  }
+  .tap-btn {
+    flex: 0 0 106px;
+    height: 46px;
+    padding: 0 10px;
+    border: 1px solid rgba(242, 237, 223, .14);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, .045);
+    color: var(--cream-dim);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: .18s var(--ease);
+  }
+  .tap-btn:hover { color: var(--cream); background: rgba(255, 255, 255, .075); border-color: rgba(242, 237, 223, .22); }
+  .tap-btn:active, .tap-btn.is-tapped { transform: scale(.97); background: rgba(242, 237, 223, .12); }
+  .tap-btn kbd { height: 16px; min-width: 16px; font-size: 8.5px; opacity: .45; }
+  .play-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 46px;
+    padding: 0 13px;
+    border: 1px solid rgba(255, 246, 233, .12);
+    border-radius: 11px;
+    background: linear-gradient(155deg, #d16340, #ad4628);
+    color: #fff8f1;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 11px 26px -14px rgba(157, 57, 31, .9);
+    font-size: 12.5px;
+    font-weight: 680;
+    letter-spacing: .04em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+    transition: transform .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
+  }
+  .play-btn:hover {
+    transform: translateY(-1px);
+    background: linear-gradient(155deg, #dc6b47, #b84b2c);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset, 0 14px 30px -15px rgba(157, 57, 31, 1);
+  }
+  .play-btn:active { transform: translateY(0); }
+  .play-btn .play-icon, .play-btn .stop-icon { flex: 0 0 auto; }
+  .play-btn .stop-icon { display: none; }
+  .play-btn kbd { margin-left: 2px; border-color: rgba(255, 248, 241, .45); opacity: .55; }
+  .play-btn.is-playing {
+    color: var(--panel);
+    background: var(--cream);
+    border-color: rgba(255, 255, 255, .26);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .6) inset, 0 10px 24px -15px rgba(0, 0, 0, .55);
+  }
+  .play-btn.is-playing:hover { background: #fffaf0; }
+  .play-btn.is-playing .play-icon { display: none; }
+  .play-btn.is-playing .stop-icon { display: block; }
+  .play-btn.is-playing kbd { border-color: rgba(29, 33, 27, .45); }
+
+  .metro-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    padding-top: 12px;
+    color: rgba(242, 237, 223, .3);
+    font-size: 8.5px;
+    letter-spacing: .025em;
+  }
+  .metro-footer span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .metro-footer kbd { height: 14px; min-width: 14px; padding: 0 3px; border-color: rgba(242, 237, 223, .28); font-size: 7.5px; opacity: .8; }
+  .footer-sep { opacity: .4; }
+
+  /* ── Drop overlay ──────────────────────────────────────── */
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    display: grid;
+    place-items: center;
+    background: rgba(26, 29, 23, .54);
+    backdrop-filter: blur(12px) saturate(.8);
+    -webkit-backdrop-filter: blur(12px) saturate(.8);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .18s var(--ease), visibility .18s;
+  }
+  .drop-overlay.is-active { opacity: 1; visibility: visible; }
+  .drop-card {
+    width: min(520px, 84vw);
+    padding: 54px 40px;
+    border: 1.5px dashed rgba(242, 237, 223, .42);
+    border-radius: 26px;
+    background: rgba(32, 36, 28, .52);
+    text-align: center;
+    color: var(--cream);
+    box-shadow: 0 30px 90px -30px rgba(0, 0, 0, .6);
+    transform: translateY(6px) scale(.99);
+    transition: transform .22s var(--ease);
+  }
+  .drop-overlay.is-active .drop-card { transform: translateY(0) scale(1); }
+  .drop-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 18px;
+    border-radius: 19px;
+    display: grid;
+    place-items: center;
+    color: var(--cream);
+    background: rgba(242, 237, 223, .09);
+    border: 1px solid rgba(242, 237, 223, .15);
+  }
+  .drop-card h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 25px;
+    font-weight: 500;
+    letter-spacing: .05em;
+  }
+  .drop-card p { margin: 9px 0 0; color: rgba(242, 237, 223, .58); font-size: 11.5px; letter-spacing: .03em; }
+
+  /* ── Toast ─────────────────────────────────────────────── */
+  .toast-region {
+    position: fixed;
+    z-index: 600;
+    top: 82px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    pointer-events: none;
+    width: min(440px, calc(100vw - 30px));
+  }
+  .toast {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 9px 13px;
+    border: 1px solid rgba(242, 237, 223, .12);
+    border-radius: 9px;
+    color: var(--cream);
+    background: rgba(32, 36, 28, .94);
+    box-shadow: 0 12px 35px -15px rgba(20, 22, 17, .75);
+    backdrop-filter: blur(8px);
+    font-size: 11.5px;
+    line-height: 1.35;
+    letter-spacing: .01em;
+    animation: toastIn .22s var(--ease) both;
+  }
+  .toast::before {
+    content: "";
+    flex: 0 0 5px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent-light);
+  }
+  .toast.is-error::before { background: #e08d74; }
+  .toast.is-out { animation: toastOut .24s var(--ease) both; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(-6px) scale(.985); } to { opacity: 1; transform: none; } }
+  @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
+
+  /* ── Help dialog ───────────────────────────────────────── */
+  dialog {
+    width: min(540px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid rgba(56, 50, 38, .16);
+    border-radius: 19px;
+    color: var(--ink);
+    background: #fbf8f1;
+    box-shadow: 0 30px 90px -25px rgba(30, 26, 18, .55);
+  }
+  dialog::backdrop {
+    background: rgba(24, 27, 21, .46);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+  }
+  .help-card { padding: 25px 26px 22px; }
+  .help-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 20px;
+  }
+  .help-kicker {
+    margin: 0 0 5px;
+    color: var(--accent-deep);
+    font-size: 8.5px;
+    font-weight: 750;
+    letter-spacing: .2em;
+  }
+  .help-head h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: .045em;
+  }
+  .dialog-close {
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .dialog-close:hover { color: var(--ink); background: rgba(36, 38, 31, .05); }
+  .help-section + .help-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .help-section h3 {
+    margin: 0 0 9px;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 25px; }
+  .help-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 24px;
+    color: var(--ink-soft);
+    font-size: 11px;
+  }
+  .help-row > span { white-space: nowrap; }
+  .help-keys {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    flex: 0 0 auto;
+  }
+  .help-keys .plus { color: #a9a394; font-size: 9px; }
+  .help-row kbd {
+    height: auto;
+    min-height: 20px;
+    padding: 2px 5px;
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, .55);
+    color: var(--ink-soft);
+    font-size: 9px;
+    opacity: 1;
+    white-space: nowrap;
+  }
+  .help-tip {
+    margin: 18px 0 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(194, 84, 51, .13);
+    background: rgba(194, 84, 51, .055);
+    color: #7a5b4d;
+    font-size: 10.5px;
+    line-height: 1.6;
+  }
+
+  /* ── Focus mode ────────────────────────────────────────── */
+  .app.focus-mode .topbar { display: none; }
+  .app.focus-mode .main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 0;
+    max-width: none;
+  }
+  .app.focus-mode .metro { display: none; }
+  .app.focus-mode .score-pane {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .app.focus-mode .focus-exit { display: inline-flex; }
+  .app.focus-mode .viewer-toolbar { bottom: 20px; }
+  .app.focus-mode #focusToolBtn,
+  .app.focus-mode .viewer-toolbar > .toolbar-divider:last-of-type { display: none; }
+
+  /* ── Responsive / compact heights ──────────────────────── */
+  @media (max-height: 780px) and (min-width: 901px) {
+    .metro { padding: 17px 19px 12px; }
+    .tempo-block { margin-top: 10px; }
+    .bpm-number { font-size: clamp(62px, 9.5vh, 78px); }
+    .swing-section { height: 90px; margin-top: 3px; }
+    .swing-stage { max-height: 74px; }
+    .metro-controls { gap: 9px; margin-top: 5px; }
+    .control-block { gap: 4px; }
+    .meter-btn { height: 25px; }
+    .metro-actions { padding-top: 12px; }
+    .metro-footer { padding-top: 8px; }
+  }
+  @media (max-height: 700px) and (min-width: 901px) {
+    .metro { padding: 14px 17px 10px; }
+    .metro-head .metro-eyebrow { font-size: 8px; }
+    .tempo-block { margin-top: 7px; }
+    .tempo-word { font-size: 10px; }
+    .bpm-number { font-size: 58px; }
+    .bpm-controls { margin-top: 1px; }
+    .preset-row { margin-top: 4px; }
+    .swing-section { height: 76px; margin-top: 1px; }
+    .swing-stage { max-height: 61px; }
+    .beat-dots { height: 14px; }
+    .metro-controls { gap: 7px; margin-top: 4px; }
+    .meter-btn { height: 23px; }
+    .volume-row { height: 18px; }
+    .tap-btn, .play-btn { height: 40px; }
+    .metro-actions { padding-top: 9px; }
+    .metro-footer { display: none; }
+  }
+  @media (max-width: 1100px) {
+    .file-title, .file-sub { max-width: 220px; }
+    .topbar { gap: 11px; padding: 0 16px 0 18px; }
+    .main { padding: 15px 16px 16px; gap: 15px; }
+    .sidebar { --sidebar: 326px; }
+    .empty-card { padding: 37px 28px 24px; }
+  }
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100vh; min-height: 100dvh; }
+    .main {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(450px, 61vh) auto;
+      height: auto;
+      padding: 13px;
+      gap: 13px;
+    }
+    .metro { min-height: 0; max-height: none; }
+    .score-pane { min-height: 450px; }
+    .file-title, .file-sub { max-width: 190px; }
+    .brand-sub { display: none; }
+    .topbar-rule { display: none; }
+    .topbar-actions .focus-label, .topbar-actions .focus-key { display: none; }
+    .viewer-toolbar .toolbar-hint { display: none; }
+  }
+  @media (max-width: 620px) {
+    .topbar { height: 62px; flex-basis: 62px; padding: 0 11px; gap: 9px; }
+    .brand-text { display: none; }
+    .brand-mark { width: 34px; height: 34px; }
+    .file-title { max-width: 135px; }
+    .file-sub { max-width: 135px; }
+    .topbar-actions { gap: 2px; }
+    .upload-btn { padding: 0 11px; }
+    .upload-btn span { display: none; }
+    .help-btn { display: none; }
+    .main { padding: 9px; gap: 10px; grid-template-rows: minmax(390px, 58vh) auto; }
+    .score-pane { min-height: 390px; border-radius: 16px; }
+    .empty-state { padding: 12px; }
+    .empty-card { padding: 30px 18px 21px; border-radius: 21px; }
+    .empty-card::before, .empty-card::after { display: none; }
+    .empty-mark { width: 62px; height: 62px; border-radius: 18px; margin-bottom: 16px; }
+    .empty-card h1 { font-size: 27px; }
+    .empty-desc { margin-bottom: 19px; font-size: 11.5px; }
+    .empty-chips { gap: 5px; margin-top: 17px; }
+    .empty-chip { padding: 0 7px; font-size: 9px; }
+    .drop-tip { font-size: 9.5px; margin-top: 12px; }
+    .viewer-toolbar { bottom: 12px; max-width: calc(100% - 16px); }
+    .viewer-toolbar .toolbar-hint { display: none; }
+    .row-edit-bar { max-width: calc(100% - 16px); }
+    .row-edit-bar button { width: 30px; padding: 0; gap: 0; }
+    .row-edit-bar button .reb-text { display: none; }
+    .row-edit-bar .reb-label { width: 16px; }
+    .row-edit-bar .reb-divider { margin: 0; }
+    .metro { border-radius: 16px; }
+    .help-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ── 主模式胶囊开关：拼贴 / 动态 ──────────────────────── */
+  .mode-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    width: 178px;
+    padding: 0;
+    border: 1px solid rgba(56, 50, 38, .18);
+    border-radius: 999px;
+    background: rgba(36, 38, 31, .06);
+    cursor: pointer;
+    outline: none;
+    transition: background .2s var(--ease), border-color .2s var(--ease);
+    user-select: none;
+    -webkit-user-select: none;
+    flex: 0 0 auto;
+  }
+  .mode-pill:hover { border-color: rgba(56, 50, 38, .3); }
+  .mode-pill:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .mode-pill.is-dynamic {
+    background: rgba(194, 84, 51, .13);
+    border-color: rgba(194, 84, 51, .35);
+  }
+  .mode-pill-label {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 680;
+    letter-spacing: .12em;
+    color: #8b8779;
+    transition: color .18s var(--ease);
+    pointer-events: none;
+  }
+  .mode-pill.is-dynamic .mode-pill-label.is-active,
+  .mode-pill:not(.is-dynamic) .mode-pill-label:first-child {
+    /* set via class below */
+  }
+  .mode-pill-label.left { color: var(--muted); }
+  .mode-pill-label.right { color: var(--muted); }
+  .mode-pill:not(.is-dynamic) .mode-pill-label.left { color: var(--ink); }
+  .mode-pill.is-dynamic .mode-pill-label.right { color: var(--accent-deep); }
+  .mode-pill-knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: calc(50% - 4px);
+    height: calc(100% - 6px);
+    border-radius: 999px;
+    background: #fffdf7;
+    box-shadow: 0 1px 4px rgba(48, 41, 26, .18), 0 0 0 1px rgba(56, 50, 38, .06);
+    transition: transform .18s var(--ease), background .18s var(--ease);
+    pointer-events: none;
+  }
+  .mode-pill.is-dynamic .mode-pill-knob {
+    transform: translateX(100%);
+    background: #fff5ee;
+    box-shadow: 0 1px 6px rgba(169, 67, 38, .28), 0 0 0 1px rgba(194, 84, 51, .18);
+  }
+  .mode-pill[hidden] { display: none; }
+
+  /* 跟随模式下：隐藏旧的单页/拼放子开关（拼贴模式保留） */
+  .app.follow-mode .mode-switch { display: none; }
+  .app.follow-mode #dividerBeforeModeSwitch { display: none; }
+  .app.follow-mode .stage-hint { top: 64px; }
+
+  /* ── 跟随覆盖层（叠在当前页图片上） ──────────────────── */
+  .follow-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 3;
+  }
+  .app:not(.follow-mode) .follow-overlay { display: none; }
+  .follow-overlay .row-box {
+    fill: rgba(194, 84, 51, .035);
+    stroke: rgba(194, 84, 51, .35);
+    stroke-width: 1.2;
+    stroke-dasharray: 5 4;
+  }
+  .follow-overlay .measure-cur {
+    fill: rgba(224, 113, 77, .16);
+    stroke: none;
+    pointer-events: none;
+  }
+  .follow-overlay .barline {
+    stroke: rgba(194, 84, 51, .55);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+  }
+  .follow-overlay .row-edge {
+    stroke: rgba(36, 38, 31, .35);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+    pointer-events: none;
+  }
+  .follow-overlay .cursor-line {
+    stroke: #c25433;
+    stroke-width: 2.4;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 4px rgba(224, 113, 77, .6));
+    pointer-events: none;
+  }
+  .follow-overlay .cursor-dot {
+    fill: #c25433;
+    pointer-events: none;
+  }
+  .follow-overlay .handle {
+    fill: transparent;
+    stroke: transparent;
+    cursor: ew-resize;
+    pointer-events: stroke;
+  }
+  .follow-overlay .row-handle {
+    fill: transparent;
+    stroke: transparent;
+    cursor: ns-resize;
+    pointer-events: stroke;
+  }
+  .follow-overlay.measuring .handle {
+    stroke: rgba(194, 84, 51, .25);
+  }
+  .follow-overlay.measuring .handle:hover,
+  .follow-overlay.measuring .handle.is-active {
+    stroke: rgba(194, 84, 51, .85);
+    stroke-width: 2;
+  }
+  .follow-overlay.measuring { pointer-events: auto; }
+
+  /* 节拍数弹泡 */
+  .beats-popover {
+    position: absolute;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 9px;
+    border-radius: 10px;
+    background: #fffdf7;
+    border: 1px solid rgba(56, 50, 38, .18);
+    box-shadow: 0 12px 28px -14px rgba(48, 41, 26, .55);
+    font-size: 11px;
+    color: var(--ink);
+    transform: translate(-50%, -100%);
+    white-space: nowrap;
+  }
+  .beats-popover[hidden] { display: none; }
+  .beats-popover .bp-label { color: var(--muted); font-size: 10px; }
+  .beats-popover button {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid rgba(56, 50, 38, .18);
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .beats-popover button:hover { background: rgba(36,38,31,.06); }
+  .beats-popover .bp-value {
+    min-width: 26px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-weight: 680;
+  }
+  .beats-popover .bp-reset {
+    width: auto;
+    padding: 0 7px;
+    font-size: 10px;
+  }
+
+  /* 跟随模式下的小提示 */
+  .follow-empty {
+    position: absolute;
+    z-index: 6;
+    left: 50%;
+    top: 64px;
+    transform: translateX(-50%);
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(252, 249, 242, .92);
+    border: 1px solid rgba(56, 50, 38, .14);
+    color: #6b6656;
+    font-size: 11px;
+    letter-spacing: .03em;
+    box-shadow: 0 8px 24px -18px rgba(48,41,26,.6);
+    pointer-events: none;
+  }
+  .follow-empty[hidden] { display: none; }
+
+  .follow-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 31px;
+    padding: 0 9px;
+    border-radius: 8px;
+    border: 0;
+    background: transparent;
+    color: #555548;
+    font-size: 10.5px;
+    font-weight: 620;
+    letter-spacing: .03em;
+    cursor: pointer;
+  }
+  .follow-tool:hover { background: rgba(36,38,31,.07); color: var(--ink); }
+  .follow-tool.is-active { color: var(--accent-deep); background: rgba(194,84,51,.1); }
+
+  /* 动态模式下悬在谱面上方的识别工具条 */
+  .follow-tools-bar {
+    position: absolute;
+    z-index: 7;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid rgba(56, 50, 38, .14);
+    background: rgba(252, 249, 242, .92);
+    box-shadow: 0 12px 32px -20px rgba(48, 41, 26, .7), 0 1px 0 rgba(255,255,255,.9) inset;
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  }
+  .follow-tools-bar[hidden] { display: none; }
+  .follow-tools-bar .follow-tool {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 11px;
+  }
+  .follow-tools-bar .follow-tool + .follow-tool {
+    box-shadow: -1px 0 0 rgba(56, 50, 38, .08);
+  }
+
+  /* 选中行：整体高亮 + 起始/结束手柄 */
+  .follow-overlay .row-box {
+    fill: rgba(194, 84, 51, .04);
+    stroke: rgba(194, 84, 51, .3);
+    stroke-width: 1.2;
+    stroke-dasharray: 5 4;
+  }
+  .follow-overlay .row-box.is-selected {
+    fill: rgba(224, 113, 77, .16);
+    stroke: #c25433;
+    stroke-width: 2.2;
+    stroke-dasharray: none;
+  }
+  .follow-overlay .barline.is-out {
+    stroke: rgba(194, 84, 51, .16);
+  }
+  /* 开头 / 结尾 / 上边 / 下边手柄（竖条或横条 + 圆点） */
+  .follow-overlay .end-handle { cursor: ew-resize; }
+  .follow-overlay .end-handle.edge-y { cursor: ns-resize; }
+  .follow-overlay .end-handle .hit {
+    stroke: transparent;
+    stroke-width: 26;
+    pointer-events: stroke;
+  }
+  .follow-overlay .end-handle .bar {
+    stroke: #c25433;
+    stroke-width: 3.4;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 3px rgba(255,255,255,.9));
+  }
+  .follow-overlay .end-handle .dot {
+    fill: #fff;
+    stroke: #c25433;
+    stroke-width: 2.6;
+  }
+  .follow-overlay .end-handle:hover .bar { stroke: #9c3d21; }
+  .follow-overlay .end-handle:hover .dot { fill: #ffe9e1; }
+
+  /* 选中一行后的浮动操作条 */
+  .row-edit-bar {
+    position: absolute;
+    z-index: 28;
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(252, 249, 242, .96);
+    border: 1px solid rgba(56, 50, 38, .18);
+    box-shadow: 0 14px 34px -16px rgba(48, 41, 26, .7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .row-edit-bar[hidden] { display: none; }
+  .row-edit-bar .reb-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 30px;
+    flex: 0 0 auto;
+    color: var(--muted);
+    cursor: help;
+  }
+  .row-edit-bar .reb-label svg { display: block; }
+  .row-edit-bar .reb-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .row-edit-bar .reb-divider {
+    width: 1px;
+    height: 18px;
+    margin: 0 1px;
+    flex: 0 0 auto;
+    background: var(--line);
+  }
+  .row-edit-bar button {
+    height: 30px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 50, 38, .18);
+    background: #fff;
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background .16s var(--ease), border-color .16s var(--ease), color .16s var(--ease);
+  }
+  .row-edit-bar button svg { flex: 0 0 auto; opacity: .78; }
+  .row-edit-bar button:hover { background: rgba(36, 38, 31, .06); }
+  .row-edit-bar button.reb-delete {
+    color: var(--accent-deep);
+    border-color: rgba(194, 84, 51, .28);
+  }
+  .row-edit-bar button.reb-delete svg { opacity: .9; }
+  .row-edit-bar button.reb-delete:hover { background: rgba(194, 84, 51, .08); }
+  .row-edit-bar button.reb-done {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .row-edit-bar button.reb-done svg { opacity: .95; }
+  .row-edit-bar button.reb-done:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+  .row-edit-bar button.reb-cancel:hover { background: rgba(36,38,31,.06); }
+  .row-edit-bar button.reb-beats.is-arming {
+    background: #2f6d4d;
+    border-color: #2f6d4d;
+    color: #fff;
+  }
+
+  /* 播放锁定时的轻提示 */
+  .lock-tip {
+    position: absolute;
+    z-index: 9;
+    left: 50%;
+    bottom: 88px;
+    transform: translateX(-50%);
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(38, 36, 30, .86);
+    color: #fffdf7;
+    font-size: 12px;
+    letter-spacing: .04em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .25s var(--ease);
+  }
+  .lock-tip.is-visible { opacity: 1; }
+
+  /* 拼贴裁剪 */
+  .free-sheet { overflow: hidden; }
+  .free-sheet.is-cropped img {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  .free-sheet.is-selected::after {
+    box-shadow: inset 0 0 0 2.5px rgba(194, 84, 51, .65);
+  }
+  /* 选中片段后：悬浮在片段上方的裁剪工具条（视觉与 .row-edit-bar 一致，屏幕像素大小恒定） */
+  .crop-chip {
+    position: absolute;
+    z-index: 26;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(252, 249, 242, .97);
+    border: 1px solid rgba(56, 50, 38, .18);
+    box-shadow: 0 14px 34px -16px rgba(48, 41, 26, .7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+  .crop-chip[hidden] { display: none; }
+  .crop-chip:not([hidden]) { display: flex; }
+  .crop-chip .crop-main,
+  .crop-chip .crop-conf {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .crop-chip .crop-conf { display: none; }
+  .crop-chip.is-cropping .crop-main { display: none; }
+  .crop-chip.is-cropping .crop-conf { display: flex; }
+
+  .crop-chip button {
+    height: 30px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 50, 38, .18);
+    background: #fff;
+    color: var(--ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background .16s var(--ease), border-color .16s var(--ease), color .16s var(--ease);
+  }
+  .crop-chip button svg { flex: 0 0 auto; opacity: .78; }
+  .crop-chip button:hover { background: rgba(36, 38, 31, .06); }
+  .crop-chip button.is-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .crop-chip button.is-primary svg { opacity: .95; }
+  .crop-chip button.is-primary:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+  .crop-stage {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: none;
+  }
+  .free-sheet.is-cropping .crop-stage { display: block; }
+  .crop-dim {
+    position: absolute;
+    background: rgba(52, 44, 32, .42);
+    pointer-events: none;
+  }
+  .crop-keep {
+    position: absolute;
+    border: 2px solid var(--accent, #c25433);
+    box-shadow: 0 0 0 1px rgba(255,255,255,.6);
+    pointer-events: none;
+  }
+  .crop-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    background: #fff;
+    border: 2px solid #c25433;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 1px rgba(255,255,255,.55);
+    z-index: 3;
+  }
+  /* 四边整条可拖的透明热区 */
+  .crop-edge {
+    position: absolute;
+    background: transparent;
+    pointer-events: auto;
+    z-index: 2;
+  }
+  .crop-edge[data-dir="n"], .crop-edge[data-dir="s"] { cursor: ns-resize; }
+  .crop-edge[data-dir="e"], .crop-edge[data-dir="w"] { cursor: ew-resize; }
+  .crop-handle[data-dir="n"], .crop-handle[data-dir="s"] { cursor: ns-resize; }
+  .crop-handle[data-dir="e"], .crop-handle[data-dir="w"] { cursor: ew-resize; }
+  .crop-handle[data-dir="nw"], .crop-handle[data-dir="se"] { cursor: nwse-resize; }
+  .crop-handle[data-dir="ne"], .crop-handle[data-dir="sw"] { cursor: nesw-resize; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand" aria-label="随谱">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M8.5 20.5 12 3.5l3.5 17H8.5Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/>
+          <path d="m12 6.8 3.8 9.1" stroke="#e0714d" stroke-width="1.35" stroke-linecap="round"/>
+          <circle cx="16.4" cy="12.2" r="1.3" fill="#e0714d"/>
+          <path d="M6 20.5h12" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">随谱</div>
+        <div class="brand-sub">FOLLOW SCORE</div>
+      </div>
+    </div>
+    <div class="topbar-rule" aria-hidden="true"></div>
+    <div class="file-meta">
+      <div class="file-title" id="fileTitle">尚未载入乐谱</div>
+      <div class="file-sub" id="fileSub">上传一张图片，或把乐谱拖进窗口</div>
+    </div>
+    <button class="btn icon-btn clear-btn" id="clearBtn" type="button" title="移除当前乐谱" aria-label="移除当前乐谱" hidden>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <path d="m6 6 12 12M18 6 6 18"/>
+      </svg>
+    </button>
+    <div class="topbar-actions">
+      <button class="btn" id="focusBtn" type="button" title="专注阅读（F）" aria-pressed="false" disabled>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>
+        </svg>
+        <span class="focus-label">专注</span>
+        <kbd class="focus-key">F</kbd>
+      </button>
+      <button class="help-btn" id="helpBtn" type="button" title="快捷键与使用说明" aria-label="快捷键与使用说明">?</button>
+      <button class="upload-btn" id="uploadBtn" type="button">
+        <svg class="upload-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
+          <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>
+        </svg>
+        <span id="uploadBtnLabel">上传乐谱</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="score-pane" aria-label="乐谱预览">
+      <div class="score-stage">
+        <div class="score-viewport" id="viewport">
+          <div class="score-paper" id="paper">
+            <img id="scoreImg" alt="乐谱" draggable="false">
+            <svg class="follow-overlay" id="followOverlay" aria-hidden="true"></svg>
+          </div>
+          <div class="free-canvas" id="freeCanvas" aria-label="自由拼放乐谱画布"></div>
+        </div>
+
+        <div class="empty-state" id="emptyState">
+          <div class="empty-card">
+            <div class="empty-mark" aria-hidden="true">
+              <svg width="37" height="37" viewBox="0 0 48 48" fill="none">
+                <path d="M11 7.5h20l7 7v26H11V7.5Z" fill="#fffdf8" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/>
+                <path d="M31 7.5v7h7" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/>
+                <path d="M17 26.5c2.7-6.1 8.4-9 14-7.8-2.6 5.9-7.7 9.3-14 7.8Z" fill="#f0e4d3" stroke="#c25433" stroke-width="1.25" stroke-linejoin="round"/>
+                <circle cx="18.2" cy="24.3" r="2.1" fill="#c25433"/>
+                <circle cx="24.5" cy="20.2" r="2.1" fill="#c25433"/>
+                <path d="M20.3 24V15.8l6.3-2.2v7.5" stroke="#c25433" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M17 35h13M17 38h8" stroke="#b4ac9b" stroke-width="1.15" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <p class="empty-kicker">Ready when you are</p>
+            <h1>把乐谱放进来</h1>
+            <p class="empty-desc">在开阔的谱面里读谱，在右侧节拍器的陪伴下练习。<br>多张图片会同时展开，可自由拖动排列。</p>
+            <button class="empty-upload-btn" id="emptyUploadBtn" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2.5"/>
+                <circle cx="8.5" cy="9.5" r="1.6"/>
+                <path d="m4 17 5-4.5 4 3.5 2.5-2.5L20 17"/>
+              </svg>
+              选择乐谱图片
+            </button>
+            <div class="empty-chips" aria-label="支持的文件与操作提示">
+              <span class="empty-chip">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m4 16 5-4 4 3 2.5-2L20 16"/></svg>
+                JPG · PNG · WebP
+              </span>
+              <span class="empty-chip">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5"/></svg>
+                多页自由拼放
+              </span>
+              <span class="empty-chip">
+                <kbd>Ctrl</kbd><span>+</span><kbd>V</kbd>
+                粘贴截图
+              </span>
+            </div>
+            <p class="drop-tip">或将图片拖到窗口任意位置</p>
+          </div>
+        </div>
+
+        <div class="lock-tip" id="lockTip" aria-live="polite">播放中已锁定，暂停后可移动</div>
+        <div class="stage-hint" id="stageHint" aria-hidden="true">滚轮缩放 · 拖拽移动 · 双击缩放</div>
+        <div class="follow-tools-bar" id="followToolsBar" hidden>
+          <button class="follow-tool" id="reDetectBtn" type="button" title="重新自动识别谱行与小节线">重新识别</button>
+          <button class="follow-tool" id="addRowBtn" type="button" title="识别不出来时，手动新增整页一行">＋新增一行</button>
+          <button class="follow-tool" id="resumePosBtn" type="button" title="回到当前播放位置（停止后浏览时用）">回到当前位置</button>
+          <button class="follow-tool" id="clearRowsBtn" type="button" title="清空本页识别结果">清空</button>
+        </div>
+        <div class="row-edit-bar" id="rowEditBar" hidden>
+          <span class="reb-label" id="rebLabel" role="img" aria-label="行编辑说明" title="拖动行四周的圆点调整边界 · 松手后点「完成」提交 · 点「改某小节拍数」后再点某个小节即可改拍数 · Enter 提交 / Esc 取消">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>
+          </span>
+          <div class="reb-group reb-group-edit">
+            <button type="button" class="reb-beats" id="rowEditBeats" title="改某小节拍数" aria-label="改某小节拍数">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>
+              <span class="reb-text">改某小节拍数</span>
+            </button>
+            <button type="button" class="reb-delete" id="rowEditDelete" title="删除本行（Ctrl+Z 可撤销）" aria-label="删除本行">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              <span class="reb-text">删除本行</span>
+            </button>
+          </div>
+          <span class="reb-divider" aria-hidden="true"></span>
+          <div class="reb-group reb-group-commit">
+            <button type="button" class="reb-done" id="rowEditDone" title="完成并提交此行调整（Enter）" aria-label="完成">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+              <span class="reb-text">完成</span>
+            </button>
+            <button type="button" class="reb-cancel" id="rowEditCancel" title="取消此行调整（Esc）" aria-label="取消">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></svg>
+              <span class="reb-text">取消</span>
+            </button>
+          </div>
+        </div>
+        <div class="follow-empty" id="followEmpty" hidden>这一页还没有小节标记 · 点下方「重新识别」，或在谱面空白处右键创建一行</div>
+        <div class="beats-popover" id="beatsPopover" hidden>
+          <span class="bp-label">本小节拍数</span>
+          <button type="button" id="bpmMinus" aria-label="减少一拍">−</button>
+          <span class="bp-value" id="bpValue">4</span>
+          <button type="button" id="bpmPlus" aria-label="增加一拍">＋</button>
+          <button type="button" class="bp-reset" id="bpReset">默认</button>
+        </div>
+
+        <div class="crop-chip" id="cropChip" hidden>
+          <div class="crop-main">
+            <button type="button" data-crop="start" title="裁剪" aria-label="裁剪">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
+              <span class="crop-text">裁剪</span>
+            </button>
+            <button type="button" data-crop="reset" title="恢复全图" aria-label="恢复全图">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><path d="M3 3v5h5"/></svg>
+              <span class="crop-text">恢复全图</span>
+            </button>
+          </div>
+          <div class="crop-conf">
+            <button type="button" class="is-primary" data-crop="commit" title="完成" aria-label="完成">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+              <span class="crop-text">完成</span>
+            </button>
+            <button type="button" data-crop="cancel" title="取消" aria-label="取消">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              <span class="crop-text">取消</span>
+            </button>
+          </div>
+        </div>
+        <div class="viewer-toolbar" id="viewerToolbar" role="toolbar" aria-label="乐谱查看工具">
+          <div class="mode-pill" id="modePill" role="switch" tabindex="0"
+               aria-checked="false" aria-label="乐谱模式：左侧拼贴自由摆放，右侧动态跟谱播放">
+            <span class="mode-pill-label left">拼贴</span>
+            <span class="mode-pill-label right">动态</span>
+            <span class="mode-pill-knob" aria-hidden="true"></span>
+          </div>
+          <div class="toolbar-divider" id="dividerBeforeModeSwitch"></div>
+          <div class="mode-switch" role="group" aria-label="乐谱显示方式">
+            <button class="mode-btn is-active" id="singleModeBtn" type="button" data-view-mode="single" aria-pressed="true" title="单页阅读">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/></svg>
+              <span>单页</span>
+            </button>
+            <button class="mode-btn" id="freeModeBtn" type="button" data-view-mode="free" aria-pressed="false" title="同时显示多张谱面并自由移动">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="8" rx="1"/><rect x="3" y="13" width="7" height="8" rx="1"/><rect x="14" y="13" width="7" height="8" rx="1"/></svg>
+              <span>拼放</span>
+            </button>
+          </div>
+          <div class="toolbar-divider"></div>
+          <div class="page-block" id="pageBlock" hidden>
+            <button class="tool-btn" id="prevPageBtn" type="button" title="上一页" aria-label="上一页">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <span class="page-counter" id="pageCounter"><strong>1</strong> / 1</span>
+            <button class="tool-btn" id="nextPageBtn" type="button" title="下一页" aria-label="下一页">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <button class="tool-btn" id="zoomOutBtn" type="button" title="缩小" aria-label="缩小">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg>
+          </button>
+          <span class="zoom-label" id="zoomLabel">100%</span>
+          <button class="tool-btn" id="zoomInBtn" type="button" title="放大" aria-label="放大">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="tool-btn" id="fitBtn" type="button" title="适应窗口（0）" aria-label="适应窗口">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"/>
+            </svg>
+          </button>
+          <div class="free-block" id="freeBlock" hidden>
+            <div class="toolbar-divider"></div>
+            <button class="tool-btn tool-wide" id="tidyBtn" type="button" title="自动整理所有谱面" aria-label="自动整理所有谱面">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+              整理
+            </button>
+          </div>
+          <div class="toolbar-divider"></div>
+          <button class="tool-btn" id="focusToolBtn" type="button" title="专注阅读（F）" aria-label="专注阅读">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>
+            </svg>
+          </button>
+        </div>
+
+        <button class="focus-exit" id="focusExitBtn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>
+          </svg>
+          退出专注
+          <kbd>Esc</kbd>
+        </button>
+      </div>
+    </section>
+
+    <aside class="metro" id="metro" aria-label="节拍器">
+      <div class="metro-head">
+        <div class="metro-eyebrow">METRONOME</div>
+        <div class="metro-status" id="metroStatus"><span class="status-dot"></span><span id="metroStatusText">待机</span></div>
+      </div>
+
+      <div class="tempo-block">
+        <div class="tempo-word">
+          <span id="tempoZh">行板</span>
+          <span class="tempo-dot">·</span>
+          <span class="tempo-it" id="tempoIt">Andante</span>
+        </div>
+        <div class="bpm-display">
+          <span class="bpm-number" id="bpmNumber">88</span>
+          <span class="bpm-unit">BPM</span>
+        </div>
+        <div class="bpm-controls">
+          <button class="step-btn" id="bpmDownBtn" type="button" title="速度 -1" aria-label="速度减一">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+          </button>
+          <input class="range bpm-slider" id="bpmSlider" type="range" min="30" max="240" step="1" value="88" aria-label="速度（BPM）">
+          <button class="step-btn" id="bpmUpBtn" type="button" title="速度 +1" aria-label="速度加一">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <div class="bpm-range-labels" aria-hidden="true"><span>30</span><span>240</span></div>
+        <div class="preset-row" role="group" aria-label="常用速度">
+          <button class="preset" type="button" data-bpm="60">60</button>
+          <button class="preset" type="button" data-bpm="80">80</button>
+          <button class="preset" type="button" data-bpm="100">100</button>
+          <button class="preset" type="button" data-bpm="120">120</button>
+        </div>
+      </div>
+
+      <div class="swing-section" aria-hidden="true">
+        <div class="swing-stage">
+          <svg class="swing-svg" viewBox="0 0 300 100" preserveAspectRatio="xMidYMid meet">
+            <path class="swing-arc" d="M111.5 18.2A82 82 0 0 1 188.5 18.2"/>
+            <g class="swing-ticks">
+              <path class="swing-tick" d="M111.5 18.2v5"/>
+              <path class="swing-tick" d="M130.2 11.7v5"/>
+              <path class="swing-tick" d="M150 9v5"/>
+              <path class="swing-tick major" d="M150 8v7"/>
+              <path class="swing-tick" d="M169.8 11.7v5"/>
+              <path class="swing-tick" d="M188.5 18.2v5"/>
+            </g>
+            <text class="swing-label" x="20" y="82" text-anchor="middle">SLOW</text>
+            <text class="swing-label" x="280" y="82" text-anchor="middle">FAST</text>
+            <circle class="swing-pivot" cx="150" cy="91" r="5.2"/>
+            <g class="pendulum-arm" id="pendulumArm">
+              <path class="pendulum-stem" d="M150 91V22"/>
+              <circle class="pendulum-weight-ring" cx="150" cy="43" r="7.5"/>
+              <circle class="pendulum-weight" cx="150" cy="43" r="4.3"/>
+            </g>
+            <circle class="swing-pivot-inner" cx="150" cy="91" r="2.1"/>
+          </svg>
+        </div>
+        <div class="beat-dots" id="beatDots" aria-hidden="true"></div>
+      </div>
+
+      <div class="metro-controls">
+        <div class="control-block">
+          <div class="control-head">
+            <span>拍号</span>
+            <span class="control-value" id="meterHint">每小节 4 拍</span>
+          </div>
+          <div class="meter-options" role="group" aria-label="拍号">
+            <button class="meter-btn" type="button" data-meter="2/4" aria-pressed="false">2/4</button>
+            <button class="meter-btn" type="button" data-meter="3/4" aria-pressed="false">3/4</button>
+            <button class="meter-btn is-active" type="button" data-meter="4/4" aria-pressed="true">4/4</button>
+            <button class="meter-btn" type="button" data-meter="6/8" aria-pressed="false">6/8</button>
+          </div>
+        </div>
+        <div class="control-block">
+          <div class="control-head">
+            <span>音量</span>
+            <span class="control-value" id="volumeValue">65%</span>
+          </div>
+          <div class="volume-row">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z"/>
+              <path d="M15 9.5a3.5 3.5 0 0 1 0 5M17.8 7a7 7 0 0 1 0 10"/>
+            </svg>
+            <input class="range volume-slider" id="volumeSlider" type="range" min="0" max="100" step="1" value="65" aria-label="节拍器音量">
+          </div>
+        </div>
+      </div>
+
+      <div class="metro-actions">
+        <button class="tap-btn" id="tapBtn" type="button" title="连续轻点，估算速度（T）">
+          轻点测速 <kbd>T</kbd>
+        </button>
+        <button class="play-btn" id="playBtn" type="button" aria-label="开始节拍器">
+          <svg class="play-icon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.2v13.6L19 12 8 5.2Z"/></svg>
+          <svg class="stop-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.3"/></svg>
+          <span id="playLabel">开始</span>
+          <kbd>Space</kbd>
+        </button>
+      </div>
+
+      <div class="metro-footer">
+        <span><kbd>Space</kbd> 开始 / 停止</span>
+        <span class="footer-sep">·</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> 调整速度</span>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+  <div class="drop-card">
+    <div class="drop-icon">
+      <svg width="29" height="29" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
+        <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>
+      </svg>
+    </div>
+    <h2>松开以导入乐谱</h2>
+    <p>支持 JPG、PNG、WebP 等图片 · 可一次导入多页</p>
+  </div>
+</div>
+
+<div class="toast-region" id="toastRegion" role="status" aria-live="polite"></div>
+
+<dialog id="helpDialog" aria-labelledby="helpTitle">
+  <div class="help-card">
+    <div class="help-head">
+      <div>
+        <p class="help-kicker">QUICK GUIDE</p>
+        <h2 id="helpTitle">快捷键与手势</h2>
+      </div>
+      <button class="dialog-close" id="closeHelpBtn" type="button" title="关闭" aria-label="关闭">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="help-section">
+      <h3>节拍器</h3>
+      <div class="help-grid">
+        <div class="help-row"><span>开始 / 停止</span><span class="help-keys"><kbd>Space</kbd></span></div>
+        <div class="help-row"><span>微调速度</span><span class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></span></div>
+        <div class="help-row"><span>快速测速</span><span class="help-keys"><kbd>T</kbd></span></div>
+        <div class="help-row"><span>每次 ±5 BPM</span><span class="help-keys"><kbd>Shift</kbd><span class="plus">+</span><kbd>↑</kbd></span></div>
+      </div>
+    </div>
+
+    <div class="help-section">
+      <h3>乐谱</h3>
+      <div class="help-grid">
+        <div class="help-row"><span>放大 / 缩小</span><span class="help-keys"><kbd>滚轮</kbd></span></div>
+        <div class="help-row"><span>单页移动</span><span class="help-keys"><kbd>拖拽</kbd></span></div>
+        <div class="help-row"><span>适应窗口</span><span class="help-keys"><kbd>0</kbd></span></div>
+        <div class="help-row"><span>单页切换</span><span class="help-keys"><kbd>←</kbd><kbd>→</kbd></span></div>
+        <div class="help-row"><span>专注阅读</span><span class="help-keys"><kbd>F</kbd></span></div>
+        <div class="help-row"><span>退出专注</span><span class="help-keys"><kbd>Esc</kbd></span></div>
+      </div>
+    </div>
+
+    <div class="help-section">
+      <h3>拼放模式</h3>
+      <div class="help-grid">
+        <div class="help-row"><span>同时展开多页</span><span class="help-keys"><kbd>拼放</kbd></span></div>
+        <div class="help-row"><span>移动某张谱面</span><span class="help-keys"><kbd>拖拽</kbd></span></div>
+        <div class="help-row"><span>查看该页单页</span><span class="help-keys"><kbd>双击</kbd></span></div>
+        <div class="help-row"><span>重新自动排列</span><span class="help-keys"><kbd>整理</kbd></span></div>
+      </div>
+    </div>
+
+    <div class="help-section">
+      <h3>动态跟谱</h3>
+      <div class="help-grid">
+        <div class="help-row"><span>切换拼贴 / 动态</span><span class="help-keys"><kbd>G</kbd></span></div>
+        <div class="help-row"><span>开始跟随</span><span class="help-keys"><kbd>Space</kbd></span></div>
+        <div class="help-row"><span>拖动小节线修正</span><span class="help-keys"><kbd>拖拽红线</kbd></span></div>
+        <div class="help-row"><span>双击空白加线 / 双击线删除</span><span class="help-keys"><kbd>双击</kbd></span></div>
+      </div>
+    </div>
+
+    <p class="help-tip">小提示：多页图片会自动展开到「拼放」画布，可逐张拖动摆放；双击任意谱面即可切回该页的单页阅读。也可以直接按 Ctrl+V 粘贴乐谱截图。</p>
+  </div>
+</dialog>
+
+<input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/avif" multiple hidden>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+  const app = $('#app');
+  const viewport = $('#viewport');
+  const paper = $('#paper');
+  const freeCanvas = $('#freeCanvas');
+  const scoreImg = $('#scoreImg');
+  const fileInput = $('#fileInput');
+  const uploadBtn = $('#uploadBtn');
+  const uploadBtnLabel = $('#uploadBtnLabel');
+  const emptyUploadBtn = $('#emptyUploadBtn');
+  const clearBtn = $('#clearBtn');
+  const focusBtn = $('#focusBtn');
+  const focusToolBtn = $('#focusToolBtn');
+  const focusExitBtn = $('#focusExitBtn');
+  const helpBtn = $('#helpBtn');
+  const helpDialog = $('#helpDialog');
+  const closeHelpBtn = $('#closeHelpBtn');
+  const fileTitle = $('#fileTitle');
+  const fileSub = $('#fileSub');
+  const stageHint = $('#stageHint');
+  const modeButtons = $$('.mode-btn');
+  const pageBlock = $('#pageBlock');
+  const freeBlock = $('#freeBlock');
+  const tidyBtn = $('#tidyBtn');
+  const pageCounter = $('#pageCounter');
+  const prevPageBtn = $('#prevPageBtn');
+  const nextPageBtn = $('#nextPageBtn');
+  const zoomInBtn = $('#zoomInBtn');
+  const zoomOutBtn = $('#zoomOutBtn');
+  const fitBtn = $('#fitBtn');
+  const zoomLabel = $('#zoomLabel');
+  const toastRegion = $('#toastRegion');
+  const dropOverlay = $('#dropOverlay');
+
+  const metro = $('#metro');
+  const metroStatusText = $('#metroStatusText');
+  const tempoZh = $('#tempoZh');
+  const tempoIt = $('#tempoIt');
+  const bpmNumber = $('#bpmNumber');
+  const bpmSlider = $('#bpmSlider');
+  const bpmDownBtn = $('#bpmDownBtn');
+  const bpmUpBtn = $('#bpmUpBtn');
+  const presets = $$('.preset');
+  const pendulumArm = $('#pendulumArm');
+  const beatDots = $('#beatDots');
+  const meterHint = $('#meterHint');
+  const meterButtons = $$('.meter-btn');
+  const volumeSlider = $('#volumeSlider');
+  const volumeValue = $('#volumeValue');
+  const tapBtn = $('#tapBtn');
+  const playBtn = $('#playBtn');
+  const playLabel = $('#playLabel');
+
+  const METERS = {
+    '2/4': { beats: 2, accents: [0] },
+    '3/4': { beats: 3, accents: [0] },
+    '4/4': { beats: 4, accents: [0] },
+    '6/8': { beats: 6, accents: [0, 3] }
+  };
+
+  const TEMPO_NAMES = [
+    { max: 59, zh: '广板', it: 'Largo' },
+    { max: 75, zh: '柔板', it: 'Adagio' },
+    { max: 95, zh: '行板', it: 'Andante' },
+    { max: 119, zh: '中板', it: 'Moderato' },
+    { max: 155, zh: '快板', it: 'Allegro' },
+    { max: 199, zh: '急板', it: 'Vivace' },
+    { max: Infinity, zh: '最急板', it: 'Presto' }
+  ];
+
+  const viewer = {
+    pages: [],
+    index: 0,
+    scale: 1,
+    fitScale: 1,
+    tx: 0,
+    ty: 0,
+    mode: 'fit',
+    displayMode: 'single',
+    sheetEls: [],
+    sheetDrag: null,
+    cropDrag: null,
+    cropEdit: null,
+    cropUndo: [],
+    selectedSheet: null,
+    freeArranged: false,
+    topZ: 1,
+    dragging: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    startTx: 0,
+    startTy: 0,
+    hintTimer: null
+  };
+
+  const audio = {
+    ctx: null,
+    master: null,
+    playing: false,
+    starting: false,
+    bpm: 88,
+    meter: '4/4',
+    volume: 0.65,
+    currentBeat: 0,
+    nextNoteTime: 0,
+    schedulerId: null,
+    rafId: null,
+    queue: [],
+    sources: new Set(),
+    armSide: 1,
+    tapTimes: [],
+    tapFlashTimer: null
+  };
+
+  const LOOKAHEAD_MS = 25;
+  const SCHEDULE_AHEAD = 0.12;
+
+  /* ── Toast ─────────────────────────────────────────────── */
+  function showToast(message, type = 'info') {
+    const el = document.createElement('div');
+    el.className = 'toast' + (type === 'error' ? ' is-error' : '');
+    el.textContent = message;
+    toastRegion.appendChild(el);
+    const remove = () => {
+      if (!el.isConnected) return;
+      el.classList.add('is-out');
+      window.setTimeout(() => el.remove(), 260);
+    };
+    window.setTimeout(remove, type === 'error' ? 3800 : 2800);
+    while (toastRegion.children.length > 3) {
+      toastRegion.firstElementChild.remove();
+    }
+  }
+
+  /* ── Score loading ─────────────────────────────────────── */
+  const isImageFile = (file) => {
+    if (!file) return false;
+    if (file.type === 'image/svg+xml') return false;
+    return file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|avif)$/i.test(file.name || '');
+  };
+
+  function sortFiles(files) {
+    return files.slice().sort((a, b) => {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+    });
+  }
+
+  function loadImagePage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        if (!img.naturalWidth || !img.naturalHeight) {
+          URL.revokeObjectURL(url);
+          reject(new Error('图片尺寸无效'));
+          return;
+        }
+        resolve({
+          url,
+          name: file.name || '未命名乐谱',
+          size: file.size || 0,
+          width: img.naturalWidth,
+          height: img.naturalHeight
+        });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('图片解码失败'));
+      };
+      img.src = url;
+    });
+  }
+
+  let loadInFlight = false;
+
+  function setBusy(busy) {
+    uploadBtn.disabled = busy;
+    emptyUploadBtn.disabled = busy;
+    uploadBtnLabel.textContent = busy
+      ? '正在载入…'
+      : (viewer.pages.length ? '更换乐谱' : '上传乐谱');
+  }
+
+  async function handleFiles(fileList) {
+    if (loadInFlight) return;
+    const files = sortFiles(Array.from(fileList || []));
+    if (!files.length) return;
+
+    const accepted = files.filter(isImageFile);
+    if (!accepted.length) {
+      showToast('请选择 JPG、PNG、WebP 等图片文件', 'error');
+      return;
+    }
+
+    loadInFlight = true;
+    setBusy(true);
+    const skipped = files.length - accepted.length;
+
+    try {
+      const loaded = [];
+      let failed = 0;
+      for (const file of accepted) {
+        try {
+          loaded.push(await loadImagePage(file));
+        } catch (error) {
+          failed += 1;
+        }
+      }
+
+      if (!loaded.length) {
+        showToast('图片读取失败，请换一张图片试试', 'error');
+        return;
+      }
+
+      const oldPages = viewer.pages;
+      const appending = oldPages.length > 0;
+
+      if (appending) {
+        // 在拼贴模式下追加新页：保留已有页和它们的位置，把新页排到旁边
+        const startZ = viewer.topZ + 1;
+        loaded.forEach((page, i) => {
+          page.x = (oldPages.length % 4) * 40 + i * 20;
+          page.y = (oldPages.length % 3) * 30 + i * 15;
+          page.z = startZ + i;
+        });
+        viewer.pages = oldPages.concat(loaded);
+        viewer.topZ = startZ + loaded.length - 1;
+        viewer.freeArranged = false;
+        viewer.sheetDrag = null;
+        viewer.displayMode = 'free';
+        // 不重置 follow.data：已有页的识别结果保留，新页自动为空
+        app.classList.add('has-score');
+        clearBtn.hidden = false;
+        focusBtn.disabled = false;
+        syncDisplayModeUI();
+        updatePageUI();
+        renderFreeSheets();
+        autoArrangeFreeSheets();
+        requestAnimationFrame(() => fitToScreen());
+        showStageHint(`已追加 ${loaded.length} 页 · 可继续拖动摆放`);
+        showToast(`已追加 ${loaded.length} 页到拼贴`);
+      } else {
+        loaded.forEach((page, index) => {
+          page.x = 0;
+          page.y = 0;
+          page.z = index + 1;
+        });
+        viewer.pages = loaded;
+        viewer.index = 0;
+        viewer.topZ = loaded.length;
+        viewer.freeArranged = false;
+        viewer.sheetDrag = null;
+        viewer.displayMode = loaded.length > 1 ? 'free' : 'single';
+        follow.data.clear();
+        follow.seq = [];
+        follow.tracks = [];
+        follow.undo = [];
+        follow.totalBeats = 0;
+        follow.pos = 0;
+        follow.globalBeat = 0;
+        follow.beatInMeasure = 0;
+        if (follow.rafId){ cancelAnimationFrame(follow.rafId); follow.rafId = null; }
+        beatsPopover.hidden = true;
+        $('#rowEditBar').hidden = true;
+        follow.selRow = null; follow.selBackup = null; follow.endDrag = null; follow.sel = null;
+        app.classList.remove('follow-mode');
+        follow.active = false;
+        modePill.classList.remove('is-dynamic');
+        modePill.setAttribute('aria-checked', 'false');
+        followToolsBar.hidden = true;
+        app.classList.add('has-score');
+        clearBtn.hidden = false;
+        focusBtn.disabled = false;
+
+        syncDisplayModeUI();
+        updatePageUI();
+        renderFreeSheets();
+
+        if (viewer.displayMode === 'free') {
+          autoArrangeFreeSheets();
+          requestAnimationFrame(() => fitToScreen());
+          showStageHint('拖动任意谱面自由摆放 · 双击谱面查看单页');
+        } else {
+          await showPage(0, true);
+          showStageHint();
+        }
+
+        for (const page of oldPages) URL.revokeObjectURL(page.url);
+
+        const extra = skipped + failed;
+        if (extra > 0) {
+          showToast(`已载入 ${loaded.length} 页，另有 ${extra} 个文件无法读取`, 'error');
+        } else if (loaded.length > 1) {
+          showToast(`已载入 ${loaded.length} 页，已同时展开`);
+        } else {
+          showToast('乐谱已载入');
+        }
+      }
+    } finally {
+      loadInFlight = false;
+      setBusy(false);
+    }
+  }
+
+  function updateFileMeta() {
+    if (!viewer.pages.length) {
+      fileTitle.textContent = '尚未载入乐谱';
+      fileSub.textContent = '上传一张图片，或把乐谱拖进窗口';
+      return;
+    }
+    const page = viewer.pages[viewer.index];
+    if (viewer.displayMode === 'free') {
+      fileTitle.textContent = viewer.pages.length > 1
+        ? `${viewer.pages.length} 页乐谱 · 自由拼放`
+        : page.name;
+      fileSub.textContent = viewer.pages.length > 1
+        ? '拖动任意谱面调整位置 · 双击谱面查看单页'
+        : formatBytes(page.size) + ' · 拖动谱面自由摆放';
+      return;
+    }
+    fileTitle.textContent = page.name;
+    fileSub.textContent = viewer.pages.length > 1
+      ? `共 ${viewer.pages.length} 页 · 当前第 ${viewer.index + 1} 页`
+      : formatBytes(page.size) + ' · 滚轮缩放，拖拽移动';
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '图片乐谱';
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function getViewPadding(vw = viewport.clientWidth, vh = viewport.clientHeight) {
+    return {
+      padX: clamp(vw * 0.045, 22, 50),
+      padTop: clamp(vh * 0.035, 18, 34),
+      padBottom: clamp(vh * 0.1, 62, 92)
+    };
+  }
+
+  function syncDisplayModeUI() {
+    const free = viewer.displayMode === 'free';
+    app.classList.toggle('free-mode', free && viewer.pages.length > 0);
+    modeButtons.forEach((button) => {
+      const active = button.dataset.viewMode === viewer.displayMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    pageBlock.hidden = free || viewer.pages.length < 2;
+    freeBlock.hidden = !free;
+  }
+
+  function updatePageUI() {
+    const total = viewer.pages.length;
+    const current = total ? viewer.index + 1 : 0;
+    pageCounter.innerHTML = `<strong>${current}</strong> / ${total}`;
+    prevPageBtn.disabled = viewer.index <= 0;
+    nextPageBtn.disabled = viewer.index >= total - 1;
+    syncDisplayModeUI();
+    updateFileMeta();
+  }
+
+  function applySheetPosition(index) {
+    const page = viewer.pages[index];
+    const sheet = viewer.sheetEls[index];
+    if (!page || !sheet) return;
+    if (!Number.isFinite(page.x)) page.x = 0;
+    if (!Number.isFinite(page.y)) page.y = 0;
+    if (!Number.isFinite(page.z)) page.z = index + 1;
+    sheet.style.transform = `translate3d(${page.x}px, ${page.y}px, 0)`;
+    sheet.style.zIndex = String(page.z);
+    if (index === viewer.selectedSheet) updateCropChip();
+  }
+
+  function pageW(p){ return p.crop ? p.crop.x1 - p.crop.x0 : p.width; }
+  function pageH(p){ return p.crop ? p.crop.y1 - p.crop.y0 : p.height; }
+
+  function applySheetCrop(index){
+    const page = viewer.pages[index];
+    const sheet = viewer.sheetEls[index];
+    if (!page || !sheet) return;
+    const img = sheet.querySelector('img');
+    if (page.crop){
+      const c = page.crop;
+      sheet.classList.add('is-cropped');
+      sheet.style.width = `${c.x1 - c.x0}px`;
+      sheet.style.height = `${c.y1 - c.y0}px`;
+      img.style.width = `${page.width}px`;
+      img.style.height = `${page.height}px`;
+      img.style.left = `${-c.x0}px`;
+      img.style.top = `${-c.y0}px`;
+    } else {
+      sheet.classList.remove('is-cropped');
+      sheet.style.width = `${page.width}px`;
+      sheet.style.height = `${page.height}px`;
+      img.style.width = '';
+      img.style.height = '';
+      img.style.left = '';
+      img.style.top = '';
+    }
+    const resetBtn = sheet.querySelector('[data-crop="reset"]');
+    if (resetBtn) resetBtn.style.display = page.crop ? '' : 'none';
+  }
+
+  function renderFreeSheets() {
+    freeCanvas.innerHTML = '';
+    viewer.sheetEls = [];
+    viewer.cropEdit = null;
+    if (!viewer.pages.length) return;
+
+    viewer.pages.forEach((page, index) => {
+      const sheet = document.createElement('article');
+      sheet.className = 'free-sheet';
+      sheet.dataset.index = String(index);
+      sheet.setAttribute('role', 'img');
+      sheet.setAttribute('aria-label', `${page.name}，第 ${index + 1} 页。拖动可移动，双击可查看单页。`);
+
+      const img = document.createElement('img');
+      img.src = page.url;
+      img.alt = '';
+      img.draggable = false;
+      img.decoding = 'async';
+      sheet.appendChild(img);
+
+      // 裁剪时的遮罩层：四块半透明 + 保留框 + 四边热区条 + 8 个控制点
+      const stage = document.createElement('div');
+      stage.className = 'crop-stage';
+      ['t', 'r', 'b', 'l'].forEach((side) => {
+        const bar = document.createElement('div');
+        bar.className = 'crop-dim';
+        bar.dataset.dim = side;
+        stage.appendChild(bar);
+      });
+      const keep = document.createElement('div');
+      keep.className = 'crop-keep';
+      stage.appendChild(keep);
+      // 四条边热区：整条边都能拖（透明、宽热区，位置/尺寸在 buildCropStage 里按缩放放大）
+      ['n', 's', 'e', 'w'].forEach((dir) => {
+        const edge = document.createElement('div');
+        edge.className = 'crop-edge';
+        edge.dataset.dir = dir;
+        stage.appendChild(edge);
+      });
+      // 8 个控制点：四角 + 四边中点
+      ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].forEach((dir) => {
+        const h = document.createElement('div');
+        h.className = 'crop-handle';
+        h.dataset.dir = dir;
+        stage.appendChild(h);
+      });
+      sheet.appendChild(stage);
+
+      freeCanvas.appendChild(sheet);
+      viewer.sheetEls.push(sheet);
+      applySheetCrop(index);
+      applySheetPosition(index);
+    });
+  }
+
+  function selectFreeSheet(index){
+    viewer.sheetEls.forEach((el, i) => el.classList.toggle('is-selected', i === index));
+    viewer.selectedSheet = index;
+    updateCropChip();
+  }
+
+  /* 独立浮层：跟随当前选中片段的位置，尺寸不受画布缩放影响 */
+  const cropChip = $('#cropChip');
+  function updateCropChip(){
+    if (!cropChip) return;
+    if (viewer.displayMode !== 'free' || !viewer.pages.length || viewer.selectedSheet == null){
+      cropChip.hidden = true;
+      return;
+    }
+    const sheet = viewer.sheetEls[viewer.selectedSheet];
+    if (!sheet){ cropChip.hidden = true; return; }
+    const stage = document.querySelector('.score-stage');
+    if (!stage){ cropChip.hidden = true; return; }
+    const sheetRect = sheet.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    // 片段整体在可视区外就隐藏
+    if (sheetRect.bottom < stageRect.top + 4 ||
+        sheetRect.top > stageRect.bottom - 4 ||
+        sheetRect.right < stageRect.left + 4 ||
+        sheetRect.left > stageRect.right - 4){
+      cropChip.hidden = true;
+      return;
+    }
+    const isCropping = sheet.classList.contains('is-cropping');
+    cropChip.classList.toggle('is-cropping', isCropping);
+    const cx = sheetRect.left + sheetRect.width / 2 - stageRect.left;
+    const cy = Math.max(8, sheetRect.top - stageRect.top - 10);
+    cropChip.style.left = cx + 'px';
+    cropChip.style.top = cy + 'px';
+    cropChip.hidden = false;
+  }
+
+  /* 裁剪撤销（只保存显示参数，不动原始图片） */
+  function pushCropUndo(index){
+    const page = viewer.pages[index];
+    if (!page) return;
+    viewer.cropUndo.push({ index, crop: page.crop ? { ...page.crop } : null });
+    if (viewer.cropUndo.length > 60) viewer.cropUndo.shift();
+  }
+  function cropUndo(){
+    if (!viewer.cropUndo.length){ showToast('没有可撤销的裁剪'); return; }
+    const u = viewer.cropUndo.pop();
+    const page = viewer.pages[u.index];
+    if (!page) return;
+    page.crop = u.crop;
+    applySheetCrop(u.index);
+    showToast('裁剪已撤销');
+  }
+
+  function buildCropStage(sheet, rect){
+    const R = rect;
+    sheet.querySelector('[data-dim="t"]').style.cssText = `left:0;top:0;width:100%;height:${R.y0}px`;
+    sheet.querySelector('[data-dim="b"]').style.cssText = `left:0;top:${R.y1}px;width:100%;height:${10000}px`;
+    sheet.querySelector('[data-dim="l"]').style.cssText = `left:0;top:${R.y0}px;width:${R.x0}px;height:${R.y1 - R.y0}px`;
+    sheet.querySelector('[data-dim="r"]').style.cssText = `left:${R.x1}px;top:${R.y0}px;width:10000px;height:${R.y1 - R.y0}px`;
+    const w = R.x1 - R.x0, h = R.y1 - R.y0;
+    const keep = sheet.querySelector('.crop-keep');
+    keep.style.left = R.x0 + 'px'; keep.style.top = R.y0 + 'px';
+    keep.style.width = w + 'px'; keep.style.height = h + 'px';
+    keep.style.borderWidth = Math.max(2, 2 / viewer.scale) + 'px';
+
+    // 缩放下仍保证屏幕上的热区大小：四角约 24px、边条约 16px、可见点约 12px
+    const sc = viewer.scale || 1;
+    const cornerHit = Math.max(22, Math.round(22 / sc));
+    const edgeHit = Math.max(16, Math.round(16 / sc));
+    const dotSize = Math.max(12, Math.round(12 / sc));
+    const half = cornerHit / 2;
+
+    // 四条边热区条（整条边可拖）
+    const edgeGeo = {
+      n: { left: R.x0, top: R.y0 - edgeHit / 2, width: w, height: edgeHit },
+      s: { left: R.x0, top: R.y1 - edgeHit / 2, width: w, height: edgeHit },
+      w: { left: R.x0 - edgeHit / 2, top: R.y0, width: edgeHit, height: h },
+      e: { left: R.x1 - edgeHit / 2, top: R.y0, width: edgeHit, height: h }
+    };
+    sheet.querySelectorAll('.crop-edge').forEach((el) => {
+      const g = edgeGeo[el.dataset.dir];
+      el.style.cssText = `left:${g.left}px;top:${g.top}px;width:${g.width}px;height:${g.height}px;`;
+    });
+
+    // 8 个可见控制点；四角热区更大
+    const midX = (R.x0 + R.x1) / 2, midY = (R.y0 + R.y1) / 2;
+    const pts = {
+      nw: [R.x0, R.y0], n: [midX, R.y0], ne: [R.x1, R.y0],
+      e: [R.x1, midY], se: [R.x1, R.y1], s: [midX, R.y1],
+      sw: [R.x0, R.y1], w: [R.x0, midY]
+    };
+    sheet.querySelectorAll('.crop-handle').forEach((el) => {
+      const [x, y] = pts[el.dataset.dir];
+      const isCorner = el.dataset.dir.length === 2;
+      const size = isCorner ? cornerHit : dotSize;
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      el.style.width = size + 'px'; el.style.height = size + 'px';
+      el.style.zIndex = isCorner ? 4 : 3;
+    });
+  }
+
+  function beginCrop(index){
+    const page = viewer.pages[index];
+    const sheet = viewer.sheetEls[index];
+    if (!page || !sheet) return;
+    // 裁剪前先恢复全尺寸，方便看到整张图
+    sheet.classList.remove('is-cropped');
+    sheet.style.width = `${page.width}px`;
+    sheet.style.height = `${page.height}px`;
+    const img = sheet.querySelector('img');
+    img.style.width = ''; img.style.height = ''; img.style.left = ''; img.style.top = '';
+    const start = page.crop
+      ? { ...page.crop }
+      : { x0: Math.round(page.width * 0.08), y0: Math.round(page.height * 0.08),
+          x1: Math.round(page.width * 0.92), y1: Math.round(page.height * 0.92) };
+    viewer.cropEdit = {
+      index, rect: start,
+      orig: page.crop ? { ...page.crop } : null // 取消时还原
+    };
+    viewer.sheetEls.forEach((el) => el.classList.remove('is-cropping'));
+    sheet.classList.add('is-cropping');
+    buildCropStage(sheet, start);
+    showStageHint('拖动四边/四角控制点裁剪 · 点✓完成提交，✗取消或Esc还原 · Ctrl+Z撤销');
+    updateCropChip();
+  }
+
+  function cancelCrop(){
+    const ce = viewer.cropEdit;
+    if (!ce) return;
+    const sheet = viewer.sheetEls[ce.index];
+    if (sheet) sheet.classList.remove('is-cropping');
+    viewer.cropEdit = null;
+    const page = viewer.pages[ce.index];
+    if (page) page.crop = ce.orig ? { ...ce.orig } : null; // 还原
+    applySheetCrop(ce.index);
+    updateCropChip();
+  }
+
+  function commitCrop(){
+    const ce = viewer.cropEdit;
+    if (!ce) return;
+    const page = viewer.pages[ce.index];
+    const sheet = viewer.sheetEls[ce.index];
+    if (sheet) sheet.classList.remove('is-cropping');
+    const r = ce.rect;
+    if (r.x1 - r.x0 < 24 || r.y1 - r.y0 < 24){
+      showToast('裁剪范围太小，已取消', 'error');
+      viewer.cropEdit = null;
+      applySheetCrop(ce.index);
+      return;
+    }
+    pushCropUndo(ce.index);
+    page.crop = {
+      x0: Math.round(r.x0), y0: Math.round(r.y0),
+      x1: Math.round(r.x1), y1: Math.round(r.y1)
+    };
+    viewer.cropEdit = null;
+    applySheetCrop(ce.index);
+    showToast('已裁剪 · Ctrl+Z 可撤销，点「恢复」可还原');
+    updateCropChip();
+  }
+
+  function autoArrangeFreeSheets() {
+    const pages = viewer.pages;
+    if (!pages.length) return;
+
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    const { padX, padTop, padBottom } = getViewPadding(vw, vh);
+    const availableW = Math.max(160, vw - padX * 2);
+    const availableH = Math.max(160, vh - padTop - padBottom);
+    const maxW = Math.max(...pages.map(pageW));
+    const maxH = Math.max(...pages.map(pageH));
+    const gap = Math.max(24, Math.round(Math.min(maxW, maxH) * 0.035));
+
+    let best = { cols: 1, scale: -Infinity };
+    for (let cols = 1; cols <= pages.length; cols += 1) {
+      const rows = Math.ceil(pages.length / cols);
+      const totalW = cols * maxW + (cols - 1) * gap;
+      const totalH = rows * maxH + (rows - 1) * gap;
+      const scale = Math.min(availableW / totalW, availableH / totalH);
+      if (scale > best.scale + 0.000001) best = { cols, scale };
+    }
+
+    pages.forEach((page, index) => {
+      const col = index % best.cols;
+      const row = Math.floor(index / best.cols);
+      const cellX = col * (maxW + gap);
+      const cellY = row * (maxH + gap);
+      page.x = cellX + (maxW - pageW(page)) / 2;
+      page.y = cellY + (maxH - pageH(page)) / 2;
+      page.z = index + 1;
+    });
+
+    viewer.topZ = pages.length;
+    viewer.freeArranged = true;
+    viewer.pages.forEach((page, index) => applySheetPosition(index));
+  }
+
+  function setDisplayMode(mode, options = {}) {
+    if (!viewer.pages.length || (mode !== 'single' && mode !== 'free')) return;
+    if (options.index != null) {
+      viewer.index = clamp(Number(options.index) || 0, 0, viewer.pages.length - 1);
+    }
+    viewer.displayMode = mode;
+    syncDisplayModeUI();
+    updatePageUI();
+
+    if (mode === 'free') {
+      renderFreeSheets();
+      if (!viewer.freeArranged) autoArrangeFreeSheets();
+      requestAnimationFrame(() => fitToScreen());
+      showStageHint('拖动任意谱面自由摆放 · 双击谱面查看单页');
+    } else {
+      showPage(viewer.index, true);
+      showStageHint();
+    }
+  }
+
+  async function showPage(index, resetView = true) {
+    if (!viewer.pages.length) return;
+    const nextIndex = clamp(index, 0, viewer.pages.length - 1);
+    // 翻页离开本页：行编辑已在松手时提交，这里只清掉选中态
+    if (nextIndex !== viewer.index && typeof follow !== 'undefined' && follow.active && follow.selRow != null){
+      follow.selRow = null; follow.selBackup = null;
+      const bp = $('#beatsPopover'); if (bp) bp.hidden = true;
+      const reb = $('#rowEditBar'); if (reb) reb.hidden = true;
+    }
+    viewer.index = nextIndex;
+    const page = viewer.pages[nextIndex];
+    scoreImg.alt = `${page.name}，第 ${nextIndex + 1} 页`;
+    scoreImg.src = page.url;
+    paper.style.width = `${page.width}px`;
+    paper.style.height = `${page.height}px`;
+    updatePageUI();
+
+    try {
+      await scoreImg.decode();
+    } catch (error) {
+      // The image has already been decoded once; a rare cache miss is harmless.
+    }
+
+    if (resetView && viewer.displayMode === 'single') {
+      requestAnimationFrame(() => fitToScreen());
+    } else {
+      applyTransform();
+    }
+  }
+
+  function showStageHint(message) {
+    window.clearTimeout(viewer.hintTimer);
+    stageHint.textContent = message || '滚轮缩放 · 拖拽移动 · 双击缩放';
+    stageHint.classList.add('is-visible');
+    viewer.hintTimer = window.setTimeout(() => {
+      stageHint.classList.remove('is-visible');
+    }, 3800);
+  }
+
+  function clearScore() {
+    if (!viewer.pages.length) return;
+    for (const page of viewer.pages) URL.revokeObjectURL(page.url);
+    viewer.pages = [];
+    viewer.index = 0;
+    viewer.displayMode = 'single';
+    viewer.sheetEls = [];
+    viewer.sheetDrag = null;
+    viewer.cropDrag = null;
+    viewer.cropEdit = null;
+    viewer.cropUndo = [];
+    viewer.selectedSheet = null;
+    viewer.freeArranged = false;
+    viewer.topZ = 1;
+    viewer.dragging = false;
+    viewer.pointerId = null;
+    viewport.classList.remove('is-panning', 'is-sheet-dragging');
+    freeCanvas.innerHTML = '';
+    scoreImg.removeAttribute('src');
+    app.classList.remove('has-score', 'free-mode');
+    app.classList.remove('follow-mode');
+    follow.active = false;
+    follow.data.clear();
+    follow.seq = [];
+    follow.tracks = [];
+    follow.undo = [];
+    follow.totalBeats = 0;
+    follow.pos = 0;
+    follow.globalBeat = 0;
+    follow.beatInMeasure = 0;
+    if (follow.rafId){ cancelAnimationFrame(follow.rafId); follow.rafId = null; }
+    followToolsBar.hidden = true;
+    followEmpty.hidden = true;
+    $('#rowEditBar').hidden = true;
+    follow.selRow = null; follow.selBackup = null; follow.endDrag = null; follow.sel = null;
+    beatsPopover.hidden = true;
+    modePill.classList.remove('is-dynamic');
+    modePill.setAttribute('aria-checked', 'false');
+    if (app.classList.contains('focus-mode')) setFocusMode(false);
+    clearBtn.hidden = true;
+    focusBtn.disabled = true;
+    pageBlock.hidden = true;
+    freeBlock.hidden = true;
+    stageHint.classList.remove('is-visible');
+    fileInput.value = '';
+    setBusy(false);
+    syncDisplayModeUI();
+    updateFileMeta();
+    showToast('已关闭当前乐谱');
+  }
+
+  /* ── Zoom & pan ────────────────────────────────────────── */
+  function getPage() {
+    return viewer.pages[viewer.index] || null;
+  }
+
+  function getCanvasBounds() {
+    if (viewer.displayMode === 'free') {
+      if (!viewer.pages.length) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const page of viewer.pages) {
+        minX = Math.min(minX, page.x);
+        minY = Math.min(minY, page.y);
+        maxX = Math.max(maxX, page.x + page.width);
+        maxY = Math.max(maxY, page.y + page.height);
+      }
+      return {
+        x: minX,
+        y: minY,
+        width: Math.max(1, maxX - minX),
+        height: Math.max(1, maxY - minY)
+      };
+    }
+
+    const page = getPage();
+    return page ? { x: 0, y: 0, width: page.width, height: page.height } : null;
+  }
+
+  function fitToScreen() {
+    const bounds = getCanvasBounds();
+    if (!bounds) return;
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    if (!vw || !vh) return;
+
+    const { padX, padTop, padBottom } = getViewPadding(vw, vh);
+    const availableW = Math.max(80, vw - padX * 2);
+    const availableH = Math.max(80, vh - padTop - padBottom);
+    const scale = Math.min(availableW / bounds.width, availableH / bounds.height);
+
+    viewer.scale = scale;
+    viewer.fitScale = scale;
+    viewer.tx = (vw - bounds.width * scale) / 2 - bounds.x * scale;
+    viewer.ty = padTop + (availableH - bounds.height * scale) / 2 - bounds.y * scale;
+    viewer.mode = 'fit';
+    applyTransform();
+    updateZoomLabel();
+  }
+
+  function applyTransform() {
+    const transform = `translate3d(${viewer.tx}px, ${viewer.ty}px, 0) scale(${viewer.scale})`;
+    paper.style.transform = transform;
+    freeCanvas.style.transform = transform;
+    if (typeof updateCropChip === 'function') updateCropChip();
+  }
+
+  function updateZoomLabel() {
+    zoomLabel.textContent = `${Math.round(viewer.scale * 100)}%`;
+  }
+
+  function scaleLimits() {
+    return {
+      min: Math.min(0.07, viewer.fitScale * 0.55),
+      max: Math.max(6, viewer.fitScale * 5)
+    };
+  }
+
+  function clampPan() {
+    const bounds = getCanvasBounds();
+    if (!bounds) return;
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    const sw = bounds.width * viewer.scale;
+    const sh = bounds.height * viewer.scale;
+    const marginX = 74;
+    const marginY = 48;
+    const bottomMargin = 70;
+
+    if (sw < vw - marginX * 2) {
+      viewer.tx = (vw - sw) / 2 - bounds.x * viewer.scale;
+    } else {
+      const left = viewer.tx + bounds.x * viewer.scale;
+      viewer.tx = clamp(left, vw - sw - marginX, marginX) - bounds.x * viewer.scale;
+    }
+
+    if (sh < vh - marginY - bottomMargin) {
+      viewer.ty = (vh - sh) / 2 - bounds.y * viewer.scale;
+    } else {
+      const top = viewer.ty + bounds.y * viewer.scale;
+      viewer.ty = clamp(top, vh - sh - bottomMargin, marginY) - bounds.y * viewer.scale;
+    }
+  }
+
+  function zoomAt(targetScale, focusX, focusY) {
+    if (!getCanvasBounds()) return;
+    const limits = scaleLimits();
+    const next = clamp(targetScale, limits.min, limits.max);
+    if (!Number.isFinite(next)) return;
+    const ratio = next / viewer.scale;
+    viewer.tx = focusX - (focusX - viewer.tx) * ratio;
+    viewer.ty = focusY - (focusY - viewer.ty) * ratio;
+    viewer.scale = next;
+    viewer.mode = 'manual';
+    clampPan();
+    applyTransform();
+    updateZoomLabel();
+  }
+
+  function zoomFromCenter(factor) {
+    zoomAt(viewer.scale * factor, viewport.clientWidth / 2, viewport.clientHeight / 2);
+  }
+
+  viewport.addEventListener('wheel', (event) => {
+    if (!viewer.pages.length) return;
+    event.preventDefault();
+    let delta = event.deltaY;
+    if (event.deltaMode === 1) delta *= 16;
+    else if (event.deltaMode === 2) delta *= viewport.clientHeight;
+    const rect = viewport.getBoundingClientRect();
+    const factor = Math.exp(-clamp(delta, -180, 180) * 0.0018);
+    zoomAt(
+      viewer.scale * factor,
+      event.clientX - rect.left,
+      event.clientY - rect.top
+    );
+  }, { passive: false });
+
+  viewport.addEventListener('pointerdown', (event) => {
+    if (!viewer.pages.length || event.button !== 0) return;
+    const target = event.target;
+    if (target.closest('button')) return;
+
+    if (viewer.displayMode === 'free') {
+      const sheet = target.closest('.free-sheet');
+      // 裁剪中：点到裁剪框之外（空白或其他页）= 提交本次裁剪
+      const croppingEl = viewer.sheetEls.find(el => el && el.classList.contains('is-cropping'));
+      if (croppingEl && sheet !== croppingEl){
+        commitCrop();
+        if (sheet && freeCanvas.contains(sheet)) return; // 点到其他页：先提交，再点一次才选那页
+        return;
+      }
+      if (sheet && freeCanvas.contains(sheet)) {
+        const index = Number(sheet.dataset.index);
+
+        // 裁剪控制点 / 四边热区：开始拖裁剪
+        const handle = target.closest('.crop-handle, .crop-edge');
+        if (handle && sheet.classList.contains('is-cropping')){
+          const ce = viewer.cropEdit;
+          if (ce && ce.index === index){
+            viewer.cropDrag = {
+              index, dir: handle.dataset.dir,
+              pointerId: event.pointerId,
+              startX: event.clientX, startY: event.clientY,
+              rect: { ...ce.rect }
+            };
+            try { viewport.setPointerCapture(event.pointerId); } catch (error) {}
+            event.preventDefault();
+            return;
+          }
+        }
+        // 小按钮交给 click
+        if (target.closest('.crop-chip')) return;
+        // 裁剪中不允许拖动画布
+        if (sheet.classList.contains('is-cropping')) return;
+
+        const page = viewer.pages[index];
+        if (page) {
+          selectFreeSheet(index);
+          page.z = ++viewer.topZ;
+          viewer.index = index;
+          sheet.style.zIndex = String(page.z);
+          viewer.sheetDrag = {
+            pointerId: event.pointerId,
+            index,
+            el: sheet,
+            startX: event.clientX,
+            startY: event.clientY,
+            pageX: page.x,
+            pageY: page.y
+          };
+          viewer.dragging = false;
+          viewport.classList.add('is-sheet-dragging');
+          sheet.classList.add('is-dragging');
+          try { viewport.setPointerCapture(event.pointerId); } catch (error) {}
+          return;
+        }
+      }
+      // 点空白处取消选中（非裁剪中）
+      selectFreeSheet(null);
+    }
+
+    viewer.sheetDrag = null;
+    // 动态模式编辑一行时：点到行框/手柄之外 = 结束本次拖动、停在待确认（不平移、不提交，提交只认完成）
+    if (typeof follow !== 'undefined' && follow.active && !audio.playing && follow.selRow != null){
+      const t = event.target;
+      const onRowUi = (t.closest && (t.closest('.end-handle') || t.closest('.row-box'))) ||
+        (t.classList && t.classList.contains('handle'));
+      if (onRowUi) return;   // 行内 UI 交给 followOverlay 自己处理，不要开始画布平移
+      return;                // 编辑中点到行外：同样不平移（保持"停在待确认"的意图）
+    }
+    // 动态模式播放中：画布由播放进度驱动，禁止拖动平移
+    if (typeof follow !== 'undefined' && follow.active && audio.playing){
+      showLockTip();
+      return;
+    }
+    viewer.dragging = true;
+    viewer.pointerId = event.pointerId;
+    viewer.startX = event.clientX;
+    viewer.startY = event.clientY;
+    viewer.startTx = viewer.tx;
+    viewer.startTy = viewer.ty;
+    viewport.classList.add('is-panning');
+    try { viewport.setPointerCapture(event.pointerId); } catch (error) {}
+  });
+
+  viewport.addEventListener('pointermove', (event) => {
+    if (viewer.cropDrag) {
+      if (event.pointerId !== viewer.cropDrag.pointerId) return;
+      const { index, dir, startX, startY, rect } = viewer.cropDrag;
+      const page = viewer.pages[index];
+      const sheet = viewer.sheetEls[index];
+      if (!page || !sheet) return;
+      const dx = (event.clientX - startX) / viewer.scale;
+      const dy = (event.clientY - startY) / viewer.scale;
+      const r = { ...rect };
+      const min = 24;
+      if (dir.includes('w')) r.x0 = clamp(rect.x0 + dx, 0, rect.x1 - min);
+      if (dir.includes('e')) r.x1 = clamp(rect.x1 + dx, rect.x0 + min, page.width);
+      if (dir.includes('n')) r.y0 = clamp(rect.y0 + dy, 0, rect.y1 - min);
+      if (dir.includes('s')) r.y1 = clamp(rect.y1 + dy, rect.y0 + min, page.height);
+      viewer.cropEdit.rect = r;
+      buildCropStage(sheet, r);
+      event.preventDefault();
+      return;
+    }
+
+    if (viewer.sheetDrag) {
+      if (event.pointerId !== viewer.sheetDrag.pointerId) return;
+      event.preventDefault();
+      const page = viewer.pages[viewer.sheetDrag.index];
+      if (!page) return;
+      page.x = viewer.sheetDrag.pageX + (event.clientX - viewer.sheetDrag.startX) / viewer.scale;
+      page.y = viewer.sheetDrag.pageY + (event.clientY - viewer.sheetDrag.startY) / viewer.scale;
+      applySheetPosition(viewer.sheetDrag.index);
+      return;
+    }
+
+    if (!viewer.dragging || event.pointerId !== viewer.pointerId) return;
+    event.preventDefault();
+    viewer.tx = viewer.startTx + (event.clientX - viewer.startX);
+    viewer.ty = viewer.startTy + (event.clientY - viewer.startY);
+    viewer.mode = 'manual';
+    clampPan();
+    applyTransform();
+  });
+
+  function endPan(event) {
+    if (!viewer.dragging || (event && event.pointerId !== viewer.pointerId)) return;
+    viewer.dragging = false;
+    viewer.pointerId = null;
+    viewport.classList.remove('is-panning');
+  }
+
+  function endPointer(event) {
+    if (viewer.cropDrag) {
+      if (event && event.pointerId !== viewer.cropDrag.pointerId) return;
+      viewer.cropDrag = null; // 松手只结束拖动，不自动提交；由✓完成或点空白提交
+      return;
+    }
+    if (viewer.sheetDrag) {
+      if (event && event.pointerId !== viewer.sheetDrag.pointerId) return;
+      viewer.sheetDrag.el.classList.remove('is-dragging');
+      viewport.classList.remove('is-sheet-dragging');
+      viewer.sheetDrag = null;
+      return;
+    }
+    endPan(event);
+  }
+
+  viewport.addEventListener('pointerup', endPointer);
+  viewport.addEventListener('pointercancel', endPointer);
+  viewport.addEventListener('lostpointercapture', endPointer);
+
+  viewport.addEventListener('dblclick', (event) => {
+    if (!viewer.pages.length) return;
+    const target = event.target;
+
+    if (viewer.displayMode === 'free') {
+      // Pointer capture can retarget the dblclick event, so also resolve by position.
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const sheet = target.closest('.free-sheet') || (hit && hit.closest('.free-sheet'));
+      if (sheet) {
+        setDisplayMode('single', { index: Number(sheet.dataset.index) });
+      } else {
+        fitToScreen();
+      }
+      return;
+    }
+
+    if (target.closest('button')) return;
+    if (viewer.mode === 'fit') {
+      const rect = viewport.getBoundingClientRect();
+      zoomAt(1, event.clientX - rect.left, event.clientY - rect.top);
+    } else {
+      fitToScreen();
+    }
+  });
+
+  const resizeObserver = new ResizeObserver(() => {
+    if (!viewer.pages.length) return;
+    if (viewer.mode === 'fit') fitToScreen();
+    else {
+      clampPan();
+      applyTransform();
+    }
+  });
+  resizeObserver.observe(viewport);
+  window.addEventListener('resize', updateCropChip);
+
+  zoomInBtn.addEventListener('click', () => zoomFromCenter(1.18));
+  zoomOutBtn.addEventListener('click', () => zoomFromCenter(1 / 1.18));
+  fitBtn.addEventListener('click', fitToScreen);
+  prevPageBtn.addEventListener('click', () => {
+    if (viewer.index > 0) showPage(viewer.index - 1);
+  });
+  nextPageBtn.addEventListener('click', () => {
+    if (viewer.index < viewer.pages.length - 1) showPage(viewer.index + 1);
+  });
+  modeButtons.forEach((button) => {
+    button.addEventListener('click', () => setDisplayMode(button.dataset.viewMode));
+  });
+  tidyBtn.addEventListener('click', () => {
+    if (!viewer.pages.length || viewer.displayMode !== 'free') return;
+    autoArrangeFreeSheets();
+    fitToScreen();
+    showStageHint('谱面已重新整理 · 可继续拖动调整');
+  });
+
+  // 裁剪 / 恢复按钮（挂在独立浮层上）
+  cropChip.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-crop]');
+    if (!btn) return;
+    const index = viewer.selectedSheet;
+    if (index == null) return;
+    if (btn.dataset.crop === 'start') beginCrop(index);
+    else if (btn.dataset.crop === 'commit') commitCrop();
+    else if (btn.dataset.crop === 'cancel') cancelCrop();
+    else if (btn.dataset.crop === 'reset'){
+      const page = viewer.pages[index];
+      if (!page || !page.crop) return;
+      pushCropUndo(index);
+      page.crop = null;
+      applySheetCrop(index);
+      showToast('已恢复全图 · Ctrl+Z 可重做');
+    }
+  });
+
+  /* ── Focus mode ────────────────────────────────────────── */
+  function setFocusMode(enabled) {
+    if (enabled && !viewer.pages.length) return;
+    app.classList.toggle('focus-mode', enabled);
+    focusBtn.setAttribute('aria-pressed', String(enabled));
+    focusBtn.title = enabled ? '退出专注（Esc）' : '专注阅读（F）';
+    requestAnimationFrame(() => {
+      if (!viewer.pages.length) return;
+      if (viewer.mode === 'fit') fitToScreen();
+      else {
+        clampPan();
+        applyTransform();
+      }
+    });
+  }
+
+  focusBtn.addEventListener('click', () => setFocusMode(!app.classList.contains('focus-mode')));
+  focusToolBtn.addEventListener('click', () => setFocusMode(true));
+  focusExitBtn.addEventListener('click', () => setFocusMode(false));
+
+  /* ── File input / drag & drop / paste ──────────────────── */
+  const openFilePicker = () => {
+    if (uploadBtn.disabled) return;
+    fileInput.value = '';
+    fileInput.click();
+  };
+  uploadBtn.addEventListener('click', openFilePicker);
+  emptyUploadBtn.addEventListener('click', openFilePicker);
+  clearBtn.addEventListener('click', clearScore);
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files.length) {
+      handleFiles(fileInput.files);
+    }
+  });
+
+  let dragDepth = 0;
+  const hasFiles = (event) => {
+    const types = event.dataTransfer && event.dataTransfer.types;
+    return types && Array.from(types).includes('Files');
+  };
+
+  window.addEventListener('dragenter', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    dropOverlay.classList.add('is-active');
+    dropOverlay.setAttribute('aria-hidden', 'false');
+  });
+
+  window.addEventListener('dragover', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  });
+
+  window.addEventListener('dragleave', (event) => {
+    if (!hasFiles(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) {
+      dropOverlay.classList.remove('is-active');
+      dropOverlay.setAttribute('aria-hidden', 'true');
+    }
+  });
+
+  window.addEventListener('drop', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    dropOverlay.classList.remove('is-active');
+    dropOverlay.setAttribute('aria-hidden', 'true');
+    if (event.dataTransfer && event.dataTransfer.files.length) {
+      handleFiles(event.dataTransfer.files);
+    }
+  });
+
+  document.addEventListener('paste', (event) => {
+    if (isTextInput(event.target)) return;
+    const clipboard = event.clipboardData;
+    if (!clipboard) return;
+    const files = Array.from(clipboard.files || []).filter(isImageFile);
+    if (!files.length) return;
+    event.preventDefault();
+    handleFiles(files);
+  });
+
+  /* ── Metronome audio ───────────────────────────────────── */
+  async function ensureAudio() {
+    if (!audio.ctx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) throw new Error('当前浏览器不支持 Web Audio API');
+      audio.ctx = new AudioContextClass();
+      audio.master = audio.ctx.createGain();
+      audio.master.gain.value = audio.volume;
+      audio.master.connect(audio.ctx.destination);
+    }
+    if (audio.ctx.state === 'suspended') {
+      await audio.ctx.resume();
+    }
+    return audio.ctx;
+  }
+
+  function scheduleClick(beat, time) {
+    const ctx = audio.ctx;
+    if (!ctx || !audio.master) return;
+    const meter = METERS[audio.meter];
+    const isAccent = meter.accents.includes(beat);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const level = isAccent ? 0.9 : 0.54;
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(isAccent ? 1480 : 990, time);
+    osc.frequency.exponentialRampToValueAtTime(isAccent ? 920 : 640, time + 0.027);
+
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(level, time + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.052);
+
+    osc.connect(gain);
+    gain.connect(audio.master);
+
+    const source = { osc, gain };
+    audio.sources.add(source);
+    osc.onended = () => {
+      audio.sources.delete(source);
+      try { osc.disconnect(); } catch (error) {}
+      try { gain.disconnect(); } catch (error) {}
+    };
+    osc.start(time);
+    osc.stop(time + 0.075);
+  }
+
+  function cancelScheduledClicks() {
+    for (const source of Array.from(audio.sources)) {
+      try { source.osc.stop(); } catch (error) {}
+      try { source.osc.disconnect(); } catch (error) {}
+      try { source.gain.disconnect(); } catch (error) {}
+      audio.sources.delete(source);
+    }
+  }
+
+  function scheduler() {
+    if (!audio.playing || !audio.ctx) return;
+    const meter = METERS[audio.meter];
+    while (audio.nextNoteTime < audio.ctx.currentTime + SCHEDULE_AHEAD) {
+      scheduleClick(audio.currentBeat, audio.nextNoteTime);
+      audio.queue.push({ beat: audio.currentBeat, time: audio.nextNoteTime });
+      audio.nextNoteTime += 60 / audio.bpm;
+      audio.currentBeat = (audio.currentBeat + 1) % meter.beats;
+    }
+  }
+
+  function paintMetronome() {
+    if (!audio.playing || !audio.ctx) return;
+    const now = audio.ctx.currentTime;
+    while (audio.queue.length && audio.queue[0].time < now - 0.35) {
+      audio.queue.shift();
+    }
+    while (audio.queue.length && audio.queue[0].time <= now + 0.012) {
+      const event = audio.queue.shift();
+      showBeat(event.beat);
+      if (typeof follow !== 'undefined') onAudioBeat(event.time);
+    }
+    audio.rafId = requestAnimationFrame(paintMetronome);
+  }
+
+  function showBeat(beat) {
+    const meter = METERS[audio.meter];
+    const dots = Array.from(beatDots.children);
+    dots.forEach((dot, index) => dot.classList.toggle('is-active', index === beat));
+
+    const angle = audio.armSide * 27;
+    audio.armSide *= -1;
+    const swingMs = clamp((60 / audio.bpm) * 1000 * 0.86, 100, 760);
+    pendulumArm.style.setProperty('--swing-ms', `${swingMs}ms`);
+    pendulumArm.style.transform = `rotate(${angle}deg)`;
+
+    bpmNumber.classList.remove('is-pulsing');
+    void bpmNumber.offsetWidth;
+    bpmNumber.classList.add('is-pulsing');
+    window.setTimeout(() => bpmNumber.classList.remove('is-pulsing'), 260);
+
+    // A quiet visual cue for the accented beat.
+    if (meter.accents.includes(beat)) {
+      metro.dataset.accent = 'true';
+      window.setTimeout(() => { delete metro.dataset.accent; }, 110);
+    }
+  }
+
+  async function startMetronome() {
+    if (audio.playing || audio.starting) return;
+    audio.starting = true;
+    try {
+      await ensureAudio();
+      if (audio.playing) return;
+      // 动态模式：如果已走到全曲结尾，重新从头播放
+      if (typeof follow !== 'undefined' && follow.active && follow.seq.length &&
+          follow.globalBeat >= follow.totalBeats){
+        resetFollowPlayback();
+      }
+      audio.playing = true;
+      audio.currentBeat = 0;
+      audio.armSide = 1;
+      audio.queue = [];
+      if (typeof follow !== 'undefined' && follow.active) follow.lastBeatAt = null;
+      cancelScheduledClicks();
+      audio.nextNoteTime = audio.ctx.currentTime + 0.08;
+      scheduler();
+      audio.schedulerId = window.setInterval(scheduler, LOOKAHEAD_MS);
+      audio.rafId = requestAnimationFrame(paintMetronome);
+      if (typeof follow !== 'undefined' && follow.active){
+        renderFollowOverlay();
+        if (follow.rafId) cancelAnimationFrame(follow.rafId);
+        follow.rafId = requestAnimationFrame(followFrame);
+      }
+      syncPlayUI();
+    } catch (error) {
+      showToast(error && error.message ? error.message : '无法启动节拍器音频', 'error');
+    } finally {
+      audio.starting = false;
+    }
+  }
+
+  function stopMetronome() {
+    if (!audio.playing) return;
+    audio.playing = false;
+    window.clearInterval(audio.schedulerId);
+    audio.schedulerId = null;
+    if (audio.rafId) cancelAnimationFrame(audio.rafId);
+    audio.rafId = null;
+    if (typeof follow !== 'undefined' && follow.rafId){
+      cancelAnimationFrame(follow.rafId);
+      follow.rafId = null;
+    }
+    cancelScheduledClicks();
+    audio.queue = [];
+    Array.from(beatDots.children).forEach((dot) => dot.classList.remove('is-active'));
+    pendulumArm.style.setProperty('--swing-ms', '420ms');
+    pendulumArm.style.transform = 'rotate(0deg)';
+    bpmNumber.classList.remove('is-pulsing');
+    syncPlayUI();
+  }
+
+  function toggleMetronome() {
+    if (audio.playing) { stopMetronome(); renderFollowOverlay(); return; }
+    if (follow.active && follow.seq.length === 0){
+      showToast('这页还没有小节标记 · 先点「重新识别」或在谱面上右键创建一行', 'error');
+      return;
+    }
+    startMetronome();
+  }
+
+  function syncPlayUI() {
+    metro.classList.toggle('is-playing', audio.playing);
+    playBtn.classList.toggle('is-playing', audio.playing);
+    playBtn.setAttribute('aria-label', audio.playing ? '停止节拍器' : '开始节拍器');
+    metroStatusText.textContent = audio.playing ? '进行中' : '待机';
+    playLabel.textContent = audio.playing ? '停止' : '开始';
+  }
+
+  function resetScheduleForMeter() {
+    if (!audio.playing || !audio.ctx) return;
+    cancelScheduledClicks();
+    audio.queue = [];
+    audio.currentBeat = 0;
+    audio.nextNoteTime = audio.ctx.currentTime + 0.06;
+    scheduler();
+  }
+
+  /* ── Metronome controls ────────────────────────────────── */
+  function updateTempoLabel() {
+    const tempo = TEMPO_NAMES.find((item) => audio.bpm <= item.max) || TEMPO_NAMES[TEMPO_NAMES.length - 1];
+    tempoZh.textContent = tempo.zh;
+    tempoIt.textContent = tempo.it;
+  }
+
+  function updateBpmUI() {
+    bpmSlider.value = String(audio.bpm);
+    bpmNumber.textContent = String(audio.bpm);
+    const percent = ((audio.bpm - 30) / (240 - 30)) * 100;
+    bpmSlider.style.setProperty('--fill', `${percent}%`);
+    updateTempoLabel();
+    presets.forEach((preset) => {
+      preset.classList.toggle('is-active', Number(preset.dataset.bpm) === audio.bpm);
+    });
+    const swingMs = clamp((60 / audio.bpm) * 1000 * 0.86, 100, 760);
+    pendulumArm.style.setProperty('--swing-ms', `${swingMs}ms`);
+  }
+
+  function setBpm(value) {
+    audio.bpm = clamp(Math.round(value), 30, 240);
+    updateBpmUI();
+    // 播放中调速：重新锚定节拍网格，避免旧网格造成空档/连发；进度（globalBeat）不重置
+    if (audio.playing && audio.ctx) rebaseScheduleForTempo();
+  }
+
+  /* 调速后重新对齐节拍调度：保留拍数与播放进度，只把下一拍挪到当前时刻之后 */
+  function rebaseScheduleForTempo() {
+    cancelScheduledClicks();
+    audio.queue = [];
+    audio.nextNoteTime = audio.ctx.currentTime + 0.06;
+    scheduler();
+    // 视觉游标同样从当前时刻起算，避免分数拍越界抢跑
+    if (typeof follow !== 'undefined' && follow.active) {
+      follow.lastBeatAt = audio.ctx.currentTime;
+    }
+  }
+
+  function renderBeatDots() {
+    const meter = METERS[audio.meter];
+    beatDots.innerHTML = '';
+    for (let i = 0; i < meter.beats; i += 1) {
+      const dot = document.createElement('span');
+      dot.className = 'beat-dot';
+      if (meter.accents.includes(i)) dot.classList.add('is-accent');
+      if (audio.meter === '6/8' && i === 3) dot.classList.add('group-start');
+      beatDots.appendChild(dot);
+    }
+    meterHint.textContent = `每小节 ${meter.beats} 拍`;
+  }
+
+  function setMeter(value) {
+    if (!METERS[value] || audio.meter === value) return;
+    audio.meter = value;
+    meterButtons.forEach((button) => {
+      const active = button.dataset.meter === value;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    renderBeatDots();
+    if (audio.playing) resetScheduleForMeter();
+    // 拍号变了：默认每小节拍数跟着变，重新计算后续行的轨迹，但不重头开始
+    if (typeof follow !== 'undefined' && follow.active){
+      rebuildTimelineKeepPosition();
+      renderFollowOverlay();
+    }
+  }
+
+  function setVolume(value) {
+    audio.volume = clamp(value / 100, 0, 1);
+    volumeSlider.value = String(Math.round(audio.volume * 100));
+    volumeSlider.style.setProperty('--fill', `${audio.volume * 100}%`);
+    volumeValue.textContent = `${Math.round(audio.volume * 100)}%`;
+    if (audio.master && audio.ctx) {
+      audio.master.gain.setTargetAtTime(audio.volume, audio.ctx.currentTime, 0.015);
+    }
+  }
+
+  function registerTap() {
+    const now = performance.now();
+    if (audio.tapTimes.length && now - audio.tapTimes[audio.tapTimes.length - 1] > 2200) {
+      audio.tapTimes = [];
+    }
+    audio.tapTimes.push(now);
+    if (audio.tapTimes.length > 7) audio.tapTimes.shift();
+
+    if (audio.tapTimes.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < audio.tapTimes.length; i += 1) {
+        intervals.push(audio.tapTimes[i] - audio.tapTimes[i - 1]);
+      }
+      const recent = intervals.slice(-4);
+      const average = recent.reduce((sum, value) => sum + value, 0) / recent.length;
+      if (average > 0) setBpm(60000 / average);
+    }
+
+    tapBtn.classList.add('is-tapped');
+    window.clearTimeout(audio.tapFlashTimer);
+    audio.tapFlashTimer = window.setTimeout(() => tapBtn.classList.remove('is-tapped'), 130);
+  }
+
+  bpmSlider.addEventListener('input', (event) => setBpm(Number(event.target.value)));
+  bpmDownBtn.addEventListener('click', () => setBpm(audio.bpm - 1));
+  bpmUpBtn.addEventListener('click', () => setBpm(audio.bpm + 1));
+  presets.forEach((preset) => {
+    preset.addEventListener('click', () => setBpm(Number(preset.dataset.bpm)));
+  });
+  meterButtons.forEach((button) => {
+    button.addEventListener('click', () => setMeter(button.dataset.meter));
+  });
+  volumeSlider.addEventListener('input', (event) => setVolume(Number(event.target.value)));
+  tapBtn.addEventListener('click', registerTap);
+  playBtn.addEventListener('click', toggleMetronome);
+
+  /* ── Help & keyboard ───────────────────────────────────── */
+  helpBtn.addEventListener('click', () => {
+    if (typeof helpDialog.showModal === 'function') helpDialog.showModal();
+    else helpDialog.setAttribute('open', '');
+  });
+  closeHelpBtn.addEventListener('click', () => helpDialog.close());
+  helpDialog.addEventListener('click', (event) => {
+    if (event.target === helpDialog) helpDialog.close();
+  });
+
+  function isTextInput(target) {
+    if (!target) return false;
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+  }
+
+  function adjustBpmWithKeyboard(delta) {
+    setBpm(audio.bpm + delta);
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented) return;
+    if (helpDialog.open) return;
+
+    if (event.code === 'Space') {
+      if (isTextInput(event.target)) return;
+      event.preventDefault();
+      toggleMetronome();
+      return;
+    }
+
+    if (isTextInput(event.target)) return;
+    const key = event.key;
+    const withShift = event.shiftKey;
+
+    if (key === 'ArrowUp' || key === 'ArrowRight') {
+      if (key === 'ArrowRight' && viewer.pages.length > 1 && viewer.displayMode === 'single' && !withShift) {
+        event.preventDefault();
+        if (viewer.index < viewer.pages.length - 1) {
+          showPage(viewer.index + 1);
+          if (follow.active){
+            follow.pos = firstSeqForPage(viewer.index);
+            follow.beatInMeasure = 0;
+            const e = follow.seq[follow.pos];
+            follow.globalBeat = e ? e.startBeat : 0;
+            renderFollowOverlay();
+          }
+        }
+        return;
+      }
+      if (key === 'ArrowUp') {
+        event.preventDefault();
+        adjustBpmWithKeyboard(withShift ? 5 : 1);
+      }
+      return;
+    }
+
+    if (key === 'ArrowDown' || key === 'ArrowLeft') {
+      if (key === 'ArrowLeft' && viewer.pages.length > 1 && viewer.displayMode === 'single' && !withShift) {
+        event.preventDefault();
+        if (viewer.index > 0) {
+          showPage(viewer.index - 1);
+          if (follow.active){
+            follow.pos = firstSeqForPage(viewer.index);
+            follow.beatInMeasure = 0;
+            const e = follow.seq[follow.pos];
+            follow.globalBeat = e ? e.startBeat : 0;
+            renderFollowOverlay();
+          }
+        }
+        return;
+      }
+      if (key === 'ArrowDown') {
+        event.preventDefault();
+        adjustBpmWithKeyboard(withShift ? -5 : -1);
+      }
+      return;
+    }
+
+    // Ctrl+Z：动态模式撤销行编辑，拼贴模式撤销裁剪
+    if ((event.ctrlKey || event.metaKey) && (key === 'z' || key === 'Z')) {
+      event.preventDefault();
+      if (follow.active) rowUndo();
+      else if (viewer.displayMode === 'free') cropUndo();
+      return;
+    }
+
+    if (key === 'g' || key === 'G') {
+      event.preventDefault();
+      setRootMode(modePill.classList.contains('is-dynamic') ? 'collage' : 'dynamic');
+      return;
+    }
+
+    if (key === 't' || key === 'T') {
+      event.preventDefault();
+      registerTap();
+      return;
+    }
+
+    if (key === 'f' || key === 'F') {
+      if (viewer.pages.length) {
+        event.preventDefault();
+        setFocusMode(!app.classList.contains('focus-mode'));
+      }
+      return;
+    }
+
+    // Enter：确认正在编辑的行（与空格启停区分开）
+    if (key === 'Enter') {
+      if (follow.active && follow.selRow != null) {
+        event.preventDefault();
+        confirmRowEdit();
+        return;
+      }
+    }
+
+    if (key === 'Escape') {
+      if (viewer.cropEdit) { cancelCrop(); return; }
+      if (follow.active && follow.selRow != null) {
+        event.preventDefault();
+        cancelRowEdit();
+        return;
+      }
+      if (app.classList.contains('focus-mode')) {
+        event.preventDefault();
+        setFocusMode(false);
+      }
+      return;
+    }
+
+    if (key === '0') {
+      if (viewer.pages.length) {
+        event.preventDefault();
+        fitToScreen();
+      }
+      return;
+    }
+
+    if (key === '+' || key === '=') {
+      if (viewer.pages.length) {
+        event.preventDefault();
+        zoomFromCenter(1.18);
+      }
+      return;
+    }
+
+    if (key === '-' || key === '_') {
+      if (viewer.pages.length) {
+        event.preventDefault();
+        zoomFromCenter(1 / 1.18);
+      }
+      return;
+    }
+
+    if (key === '?') {
+      event.preventDefault();
+      helpBtn.click();
+    }
+  });
+
+  /* ── 动态跟谱模式（BPM 驱动游标） ──────────────────────── */
+  const followOverlay = $('#followOverlay');
+  const modePill = $('#modePill');
+  const followToolsBar = $('#followToolsBar');
+  const followEmpty = $('#followEmpty');
+  const reDetectBtn = $('#reDetectBtn');
+  const resumePosBtn = $('#resumePosBtn');
+  const clearRowsBtn = $('#clearRowsBtn');
+  const lockTip = $('#lockTip');
+
+  let lockTipTimer = null;
+  function showLockTip(){
+    lockTip.classList.add('is-visible');
+    clearTimeout(lockTipTimer);
+    lockTipTimer = setTimeout(() => lockTip.classList.remove('is-visible'), 1600);
+  }
+  const beatsPopover = $('#beatsPopover');
+  const bpValue = $('#bpValue');
+
+  /* 交互模式：playing=播放中（锁定画布）/ browsing=动态模式暂停 / collage=自由拼贴 */
+  function interactMode(){
+    if (!follow.active) return 'collage';
+    return audio.playing ? 'playing' : 'browsing';
+  }
+
+  const follow = {
+    active: false,
+    data: new Map(),       // pageIndex -> { rows:[{y0,y1,x0,x1,measures:[{x0,x1,beats}]}], ready:bool }
+    seq: [],               // 全曲小节序列（含 startBeat / beats）
+    tracks: [],            // 每一行的播放轨迹 {page,row,startBeat,endBeat,x0,x1,y0,y1}
+    totalBeats: 0,
+    pos: 0,
+    globalBeat: 0,         // 已完成的拍数（整数）
+    beatInMeasure: 0,
+    lastBeatAt: null,      // 最近一拍的音频时钟时间
+    rafId: null,
+    switchingPage: false,
+    drag: null,            // 拖动小节线
+    endDrag: null,         // 拖开头/结尾手柄
+    selRow: null,          // 当前选中的行号（同一页内）
+    selBackup: null,       // 选中时的行快照，用于「取消」还原
+    sel: null,             // {row, m}（节拍数弹泡）
+    undo: []               // 行编辑撤销栈
+  };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+
+  function pageData(i){
+    if (!follow.data.has(i)) follow.data.set(i, { rows: [], ready: false });
+    return follow.data.get(i);
+  }
+
+  function measureBeats(m){
+    return (m.beats == null) ? METERS[audio.meter].beats : m.beats;
+  }
+
+  /* 统一重算：全曲小节序列 + 每一行的「拍数/像素」轨迹（变速、改拍号、改行后都调它） */
+  function buildSequence(){
+    follow.seq = [];
+    follow.tracks = [];
+    let beat = 0;
+    viewer.pages.forEach((_, pi) => {
+      const d = pageData(pi);
+      d.rows.forEach((row, ri) => {
+        let rowBeats = 0;
+        // m 用小节在 row.measures 里的真实下标（跳过被开头/结尾手柄排除的小节）
+        row.measures.forEach((m, mi) => {
+          if (!measureInRow(row, m)) return;
+          const b = measureBeats(m);
+          follow.seq.push({ page: pi, row: ri, m: mi, startBeat: beat, beats: b });
+          beat += b;
+          rowBeats += b;
+        });
+        if (rowBeats > 0){
+          follow.tracks.push({
+            page: pi,
+            row: ri,
+            startBeat: beat - rowBeats,
+            endBeat: beat,
+            x0: (row.x0 != null) ? row.x0 : row.measures[0].x0,
+            x1: (row.x1 != null) ? row.x1 : row.measures[row.measures.length - 1].x1,
+            y0: row.y0,
+            y1: row.y1
+          });
+        }
+      });
+    });
+    follow.totalBeats = beat;
+    if (follow.pos >= follow.seq.length) follow.pos = follow.seq.length ? follow.seq.length - 1 : 0;
+  }
+
+  /* 改拍号/手动改动后，保留当前位置重算 */
+  function rebuildTimelineKeepPosition(){
+    const e = follow.seq[follow.pos];
+    const saved = e ? { page: e.page, row: e.row, m: e.m } : null;
+    const inMeasure = follow.beatInMeasure;
+    buildSequence();
+    if (saved){
+      let p = follow.seq.findIndex(q => q.page === saved.page && q.row === saved.row && q.m === saved.m);
+      if (p < 0) p = firstSeqForPage(saved.page);
+      follow.pos = p;
+      const ne = follow.seq[p];
+      follow.beatInMeasure = Math.min(inMeasure, ne ? ne.beats - 1 : 0);
+      follow.globalBeat = ne ? ne.startBeat + follow.beatInMeasure : 0;
+    }
+  }
+
+  function firstSeqForPage(pi){
+    for (let i = 0; i < follow.seq.length; i++) if (follow.seq[i].page === pi) return i;
+    return 0;
+  }
+
+  /* 找当前拍（含小数）落在第几行 */
+  function trackAt(g){
+    let t = follow.tracks[0] || null;
+    for (const tr of follow.tracks){
+      if (g >= tr.startBeat) t = tr;
+      if (g < tr.endBeat) return tr;
+    }
+    return t;
+  }
+
+  /* 自动识别：水平投影找谱行，垂直投影找小节线 */
+  function detectStaffFromImage(img){
+    const natW = img.naturalWidth, natH = img.naturalHeight;
+    if (!natW || !natH) return [];
+    const s = Math.min(1, 1400 / natW);
+    const w = Math.max(80, Math.round(natW * s));
+    const h = Math.max(80, Math.round(natH * s));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    let imgData;
+    try { imgData = ctx.getImageData(0, 0, w, h).data; } catch (e) { return []; }
+    const dark = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++){
+      const r = imgData[i*4], g = imgData[i*4+1], b = imgData[i*4+2];
+      dark[i] = (0.299*r + 0.587*g + 0.114*b) < 180 ? 1 : 0;
+    }
+    const rowCount = new Float64Array(h);
+    for (let y = 0; y < h; y++){
+      let sum = 0; const off = y*w;
+      for (let x = 0; x < w; x++) sum += dark[off+x];
+      rowCount[y] = sum;
+    }
+    const rowThresh = w * 0.25;
+    const staffYs = [];
+    for (let y = 0; y < h; y++) if (rowCount[y] > rowThresh) staffYs.push(y);
+    if (staffYs.length < 3) return [];
+
+    // 先把相邻（≤2px）的横向像素合并成一条"线"，得到每条线的中心位置
+    const lineCenters = [];
+    {
+      let run = [staffYs[0]];
+      for (let i = 1; i < staffYs.length; i++){
+        if (staffYs[i] - staffYs[i-1] <= 2) run.push(staffYs[i]);
+        else { lineCenters.push(run.reduce((a,b)=>a+b,0)/run.length); run = [staffYs[i]]; }
+      }
+      lineCenters.push(run.reduce((a,b)=>a+b,0)/run.length);
+    }
+    if (lineCenters.length < 3) return [];
+
+    // 估算标准线距：取相邻线心距的中位数（排除跨行的大间隔）
+    const centerGaps = [];
+    for (let i = 1; i < lineCenters.length; i++) centerGaps.push(lineCenters[i] - lineCenters[i-1]);
+    const sortedGaps = centerGaps.slice().sort((a,b)=>a-b);
+    let lineGap = sortedGaps[Math.floor(sortedGaps.length/2)] || 10;
+    lineGap = Math.max(3, lineGap);
+
+    // 按线距分组：相邻线心距超过 2.3 倍线距 = 新的一行谱
+    const systems = [];
+    let cur = [lineCenters[0]];
+    for (let i = 1; i < lineCenters.length; i++){
+      if (lineCenters[i] - lineCenters[i-1] > lineGap * 2.3){ systems.push(cur); cur = []; }
+      cur.push(lineCenters[i]);
+    }
+    systems.push(cur);
+
+    // 筛选：一行真谱至少 3 条平行横线（五线谱 5 条、六线谱 6 条；
+    // 单条的「let ring」虚线、文字下划线会被排除），线间距基本均匀
+    const validSystems = systems.filter((sys) => {
+      if (sys.length < 3) return false;
+      const sg = [];
+      for (let i = 1; i < sys.length; i++) sg.push(sys[i] - sys[i-1]);
+      const sgs = sg.slice().sort((a,b)=>a-b);
+      const med = Math.max(3, sgs[Math.floor(sgs.length/2)] || 3);
+      const irregular = sg.filter(g => g < med * 0.45 || g > med * 1.8).length;
+      return irregular <= sg.length * 0.5;
+    });
+    if (!validSystems.length) return [];
+
+    const outRows = [];
+    for (const sys of validSystems){
+      const y0 = Math.max(0, sys[0] - lineGap * 0.9);
+      const y1 = Math.min(h, sys[sys.length-1] + lineGap * 0.9);
+      const colCount = new Float64Array(w);
+      for (let x = 0; x < w; x++){
+        let sum = 0;
+        for (let y = Math.floor(y0); y < y1; y++) sum += dark[y*w+x];
+        colCount[x] = sum;
+      }
+      const barThresh = (y1 - y0) * 0.7;
+      const barXs = [];
+      let runStart = -1;
+      for (let x = 0; x <= w; x++){
+        const hit = x < w && colCount[x] > barThresh;
+        if (hit && runStart < 0) runStart = x;
+        else if (!hit && runStart >= 0){ barXs.push((runStart + x - 1) / 2); runStart = -1; }
+      }
+      // 找本行谱线的真实左右边界：谱线是贯通横线，在该列上几乎所有谱线都 dark。
+      // 这样行框只框住有音符/小节的区域，不会横跨整页空白，游标速度也均匀。
+      const lineThreshold = Math.max(3, sys.length - 1);
+      let lineLeft = 0, lineRight = w - 1;
+      for (let x = 0; x < w; x++){
+        if (colCount[x] >= lineThreshold){ lineLeft = x; break; }
+      }
+      for (let x = w - 1; x >= 0; x--){
+        if (colCount[x] >= lineThreshold){ lineRight = x; break; }
+      }
+      if (lineRight <= lineLeft + 4){ lineLeft = 0; lineRight = w - 1; }
+
+      const minW = 22;
+      // 只保留谱线范围内的内部小节线，避免端点重复
+      const innerBars = barXs.filter(bx => bx > lineLeft + 3 && bx < lineRight - 3);
+      const bounds = [lineLeft, ...innerBars, lineRight];
+      const measures = [];
+      for (let i = 0; i < bounds.length - 1; i++){
+        const a = bounds[i], b = bounds[i + 1];
+        if (b - a >= minW) measures.push({ x0: a, x1: b, beats: null });
+      }
+      if (!measures.length){
+        measures.push({ x0: lineLeft, x1: lineRight, beats: null });
+      }
+      if (measures.length){
+        const full = measures.map(m => ({ x0: m.x0 / s, x1: m.x1 / s, beats: null }));
+        outRows.push({
+          y0: y0 / s, y1: y1 / s,
+          x0: full[0].x0, x1: full[full.length - 1].x1,
+          measures: full
+        });
+      }
+    }
+    return outRows;
+  }
+
+  /* 小节中心是否落在本行的「开头~结尾」范围内（决定它是否属于这一行） */
+  function measureInRow(row, m){
+    if (row.x0 == null || row.x1 == null) return true;
+    const cx = (m.x0 + m.x1) / 2;
+    return cx >= row.x0 && cx <= row.x1;
+  }
+  function rowEffectiveMeasures(row){
+    return row.measures.filter(m => measureInRow(row, m));
+  }
+
+  /* 识别单页图片（纯 JS：水平投影分行 + 竖向投影找小节线） */
+  function detectPageOnce(i){
+    const page = viewer.pages[i];
+    const d = pageData(i);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        d.rows = detectStaffFromImage(img);
+        d.ready = true;
+        resolve(d.rows);
+      };
+      img.onerror = () => { d.ready = true; resolve(d.rows); };
+      img.src = page.url;
+    });
+  }
+
+  async function runDetectionForPage(i){
+    const page = viewer.pages[i];
+    if (!page) return;
+    const d = pageData(i);
+    showToast('正在识别谱行…');
+    follow.selRow = null; follow.selBackup = null; follow.endDrag = null; follow.sel = null;
+    $('#rowEditBar').hidden = true;
+    const rows = await detectPageOnce(i);
+    buildSequence();
+    follow.pos = firstSeqForPage(i);
+    follow.beatInMeasure = 0;
+    const e0 = follow.seq[follow.pos];
+    follow.globalBeat = e0 ? e0.startBeat : 0;
+    renderFollowOverlay();
+    followEmpty.hidden = rows.length > 0;
+    if (rows.length > 0){
+      const e = follow.seq[follow.pos];
+      if (e){
+        const row = rows[e.row];
+        const m = row.measures[e.m];
+        centerOnPoint((m.x0 + m.x1) / 2, (row.y0 + row.y1) / 2);
+      }
+      showToast(`识别到 ${rows.length} 行谱 · 点一行可拖两端圆点调整 · 按空格开始跟随`);
+    } else {
+      showToast('没自动认出谱行 · 可点上方「＋新增一行」手动创建', 'error');
+    }
+  }
+
+  /* 进入动态模式时：把所有页都识别出来，保证多页能连续播放 */
+  async function detectAllPagesForFollow(){
+    const start = viewer.index;
+    const order = [start, ...viewer.pages.map((_, k) => k).filter((k) => k !== start)];
+    let newly = 0;
+    for (const i of order){
+      const d = pageData(i);
+      if (!d.ready){
+        if (newly === 0) showToast('正在识别谱行…');
+        await detectPageOnce(i);
+        newly += 1;
+        if (i === start) renderFollowOverlay();
+      }
+    }
+    buildSequence();
+    follow.pos = firstSeqForPage(start);
+    follow.beatInMeasure = 0;
+    const e0 = follow.seq[follow.pos];
+    follow.globalBeat = e0 ? e0.startBeat : 0;
+    renderFollowOverlay();
+    const d0 = pageData(start);
+    followEmpty.hidden = d0.rows.length > 0;
+    if (e0){
+      const row = d0.rows[e0.row];
+      const m = row.measures[e0.m];
+      centerOnPoint((m.x0 + m.x1) / 2, (row.y0 + row.y1) / 2);
+    }
+    const totalRows = order.reduce((n, i) => n + pageData(i).rows.length, 0);
+    if (newly > 0){
+      showToast(totalRows > 0 ? `共识别 ${viewer.pages.length} 页 · 按空格开始跟随` : '没自动认出谱行 · 在谱面上右键可以创建一行',
+        totalRows > 0 ? 'info' : 'error');
+    }
+  }
+
+  function svgEl(name, attrs){
+    const e = document.createElementNS(SVGNS, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  /* 行四边手柄：start/end 是左右竖条（横向拖），top/bottom 是上下横条（竖向拖），
+     都带宽热区和圆点，老人一眼能看见、好抓 */
+  function makeSideHandle(ri, edge, x0, y0, x1, y1){
+    const vertical = edge === 'start' || edge === 'end';
+    const g = svgEl('g', { class: 'end-handle' + (vertical ? '' : ' edge-y'), 'data-edge': edge, 'data-row': ri });
+    if (vertical){
+      const x = edge === 'start' ? x0 : x1;
+      g.appendChild(svgEl('line', { class: 'hit', x1: x, y1: y0 - 10, x2: x, y2: y1 + 10 }));
+      g.appendChild(svgEl('line', { class: 'bar', x1: x, y1: y0, x2: x, y2: y1 }));
+      g.appendChild(svgEl('circle', { class: 'dot', cx: x, cy: y0, r: 7 }));
+      g.appendChild(svgEl('circle', { class: 'dot', cx: x, cy: y1, r: 7 }));
+    } else {
+      const y = edge === 'top' ? y0 : y1;
+      g.appendChild(svgEl('line', { class: 'hit', x1: x0 - 10, y1: y, x2: x1 + 10, y2: y }));
+      g.appendChild(svgEl('line', { class: 'bar', x1: x0, y1: y, x2: x1, y2: y }));
+      g.appendChild(svgEl('circle', { class: 'dot', cx: x0, cy: y, r: 7 }));
+      g.appendChild(svgEl('circle', { class: 'dot', cx: x1, cy: y, r: 7 }));
+    }
+    return g;
+  }
+
+  function renderFollowOverlay(){
+    followOverlay.innerHTML = '';
+    if (!follow.active || !viewer.pages.length) return;
+    const page = getPage();
+    if (!page) return;
+    followOverlay.setAttribute('viewBox', `0 0 ${page.width} ${page.height}`);
+    const d = pageData(viewer.index);
+    const measuring = !audio.playing;
+    followOverlay.classList.toggle('measuring', measuring);
+
+    let curEntry = follow.seq[follow.pos];
+    if (curEntry && curEntry.page !== viewer.index) curEntry = null;
+
+    d.rows.forEach((row, ri) => {
+      const x0 = (row.x0 != null) ? row.x0 : 0;
+      const x1 = (row.x1 != null) ? row.x1 : page.width;
+      const isSel = measuring && follow.selRow === ri;
+      // 行框：只框住开头~结尾范围
+      followOverlay.appendChild(svgEl('rect', {
+        class: 'row-box' + (isSel ? ' is-selected' : ''),
+        x: x0, y: row.y0, width: Math.max(1, x1 - x0), height: row.y1 - row.y0,
+        'data-row': ri
+      }));
+      row.measures.forEach((m, mi) => {
+        const inside = measureInRow(row, m);
+        const isCur = inside && curEntry && curEntry.page === viewer.index && curEntry.row === ri && curEntry.m === mi;
+        if (isCur){
+          followOverlay.appendChild(svgEl('rect', {
+            class: 'measure-cur', x: m.x0, y: row.y0, width: m.x1 - m.x0, height: row.y1 - row.y0
+          }));
+        }
+        // 左小节线（在范围外的画淡）
+        followOverlay.appendChild(svgEl('line', {
+          class: 'barline' + (inside ? '' : ' is-out'), x1: m.x0, y1: row.y0, x2: m.x0, y2: row.y1
+        }));
+        if (measuring && inside){
+          const h = svgEl('line', {
+            class: 'handle', x1: m.x0, y1: row.y0, x2: m.x0, y2: row.y1,
+            'data-row': ri, 'data-m': mi, 'data-edge': 'x0'
+          });
+          h.setAttribute('stroke-width', '12');
+          followOverlay.appendChild(h);
+        }
+      });
+      const lastM = row.measures[row.measures.length - 1];
+      if (lastM){
+        const inside = measureInRow(row, lastM);
+        followOverlay.appendChild(svgEl('line', {
+          class: 'barline' + (inside ? '' : ' is-out'), x1: lastM.x1, y1: row.y0, x2: lastM.x1, y2: row.y1
+        }));
+        if (measuring && inside){
+          const h = svgEl('line', {
+            class: 'handle', x1: lastM.x1, y1: row.y0, x2: lastM.x1, y2: row.y1,
+            'data-row': ri, 'data-m': row.measures.length - 1, 'data-edge': 'x1'
+          });
+          h.setAttribute('stroke-width', '12');
+          followOverlay.appendChild(h);
+        }
+      }
+      // 选中行：四边手柄（左右管开头结尾，上下管上下边界）
+      if (isSel){
+        followOverlay.appendChild(makeSideHandle(ri, 'start', x0, row.y0, x1, row.y1));
+        followOverlay.appendChild(makeSideHandle(ri, 'end', x0, row.y0, x1, row.y1));
+        followOverlay.appendChild(makeSideHandle(ri, 'top', x0, row.y0, x1, row.y1));
+        followOverlay.appendChild(makeSideHandle(ri, 'bottom', x0, row.y0, x1, row.y1));
+      }
+    });
+
+    // 游标：播放时由 followFrame 每帧更新位置
+    if (audio.playing && curEntry){
+      const row = d.rows[curEntry.row];
+      const m = row.measures[curEntry.m];
+      const frac = (follow.globalBeat - curEntry.startBeat) / curEntry.beats;
+      const cx = m.x0 + (m.x1 - m.x0) * clamp(frac, 0, 1);
+      followOverlay.appendChild(svgEl('line', {
+        id: 'followCursorLine', class: 'cursor-line', x1: cx, y1: row.y0, x2: cx, y2: row.y1
+      }));
+      followOverlay.appendChild(svgEl('circle', {
+        id: 'followCursorDot', class: 'cursor-dot', cx, cy: row.y0 + 8, r: 4
+      }));
+    }
+  }
+
+  /* 把游标移到图像坐标（帧循环用，不重建整个 SVG） */
+  function moveCursorDom(px, y0, y1){
+    const line = document.getElementById('followCursorLine');
+    const dot = document.getElementById('followCursorDot');
+    if (line) { line.setAttribute('x1', px); line.setAttribute('x2', px); line.setAttribute('y1', y0); line.setAttribute('y2', y1); }
+    if (dot) { dot.setAttribute('cx', px); dot.setAttribute('cy', y0 + 8); }
+  }
+
+  function centerOnPoint(px, py){
+    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+    viewer.tx = vw * 0.32 - px * viewer.scale;
+    viewer.ty = vh * 0.5 - py * viewer.scale;
+    applyTransform();
+  }
+
+  /* 按一行的进度（0~1）直接定位视口：横向匀速、行内纵向固定，不做缓动 */
+  function placeAtTrack(tr, p){
+    const px = tr.x0 + (tr.x1 - tr.x0) * p;
+    const py = (tr.y0 + tr.y1) / 2;
+    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+    viewer.tx = vw * 0.32 - px * viewer.scale;
+    viewer.ty = vh * 0.5 - py * viewer.scale;
+    applyTransform();
+    moveCursorDom(px, tr.y0, tr.y1);
+  }
+
+  async function switchFollowPage(i){
+    if (follow.switchingPage) return;
+    follow.switchingPage = true;
+    await showPage(i, false);
+    renderFollowOverlay();
+    follow.switchingPage = false;
+  }
+
+  /* 播放帧循环：位置完全由音频时钟算出来 */
+  function followFrame(){
+    follow.rafId = requestAnimationFrame(followFrame);
+    if (!follow.active || !audio.playing || !audio.ctx){
+      return;
+    }
+    const now = audio.ctx.currentTime;
+    const beatDur = 60 / audio.bpm;
+    const frac = follow.lastBeatAt == null ? 0 : clamp((now - follow.lastBeatAt) / beatDur, 0, 1);
+    const g = follow.globalBeat + frac;
+    const tr = trackAt(g);
+    if (!tr) return;
+    if (tr.page !== viewer.index) switchFollowPage(tr.page);
+    const span = (tr.endBeat - tr.startBeat) || 1;
+    const p = clamp((g - tr.startBeat) / span, 0, 1);
+    placeAtTrack(tr, p);
+  }
+
+  function resetFollowPlayback(){
+    follow.pos = 0;
+    follow.beatInMeasure = 0;
+    follow.globalBeat = 0;
+    follow.lastBeatAt = null;
+    if (viewer.index !== 0) showPage(0, false);
+  }
+
+  function onAudioBeat(eventTime){
+    if (!follow.active || !follow.seq.length) return;
+    follow.lastBeatAt = eventTime;
+    follow.globalBeat++;
+
+    // 按小节推进（每小节拍数可逐小节不同）
+    let e = follow.seq[follow.pos];
+    while (e && follow.globalBeat >= e.startBeat + e.beats){
+      follow.pos++;
+      e = follow.seq[follow.pos];
+    }
+    if (follow.globalBeat >= follow.totalBeats){
+      stopMetronome();
+      follow.pos = follow.seq.length - 1;
+      follow.beatInMeasure = 0;
+      renderFollowOverlay();
+      showToast('到达全曲最后一小节，已停止');
+      return;
+    }
+    e = follow.seq[follow.pos];
+    if (e){
+      follow.beatInMeasure = follow.globalBeat - e.startBeat;
+      if (e.page !== viewer.index) switchFollowPage(e.page);
+    }
+    renderFollowOverlay();
+  }
+
+  /* 覆盖层交互：拖小节线 / 拖行分隔线 / 双击加删小节线 / 右键拆分行 / 选小节设拍数 */
+  function overlayPointToImage(e){
+    const rect = followOverlay.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) / viewer.scale,
+      y: (e.clientY - rect.top) / viewer.scale
+    };
+  }
+
+  /* 行编辑撤销：只存播放分行数据，不动底层识别流程 */
+  function cloneRows(rows){
+    return rows.map(r => ({
+      y0: r.y0, y1: r.y1,
+      x0: (r.x0 != null ? r.x0 : null), x1: (r.x1 != null ? r.x1 : null),
+      measures: r.measures.map(m => ({ x0: m.x0, x1: m.x1, beats: m.beats }))
+    }));
+  }
+  function pushRowUndo(pi){
+    follow.undo.push({ page: pi, rows: cloneRows(pageData(pi).rows) });
+    if (follow.undo.length > 60) follow.undo.shift();
+  }
+  function afterRowEdit(pi){
+    buildSequence();
+    const e = follow.seq[follow.pos];
+    if (e){ follow.globalBeat = e.startBeat + follow.beatInMeasure; }
+    renderFollowOverlay();
+  }
+  function rowUndo(){
+    if (!follow.undo.length){ showToast('没有可撤销的改动了'); return; }
+    const u = follow.undo.pop();
+    pageData(u.page).rows = cloneRows(u.rows);
+    pageData(u.page).ready = true;
+    if (u.page === viewer.index) followEmpty.hidden = pageData(u.page).rows.length > 0;
+    rebuildTimelineKeepPosition();
+    renderFollowOverlay();
+    showToast('已撤销');
+  }
+
+  /* ── 选中行 + 开头/结尾手柄 ───────────────────────────── */
+  const rowEditBar = $('#rowEditBar');
+  const ROW_MIN_W = 24; // 开头与结尾之间最小像素距离
+  const ROW_MIN_H = 24; // 上边与下边之间最小像素距离
+
+  function selectRow(ri){
+    const d = pageData(viewer.index);
+    if (ri < 0 || !d.rows[ri]) return;
+    if (follow.selRow === null){
+      // 首次进入选中：存快照，用于「取消」整段还原（也作为完成时的撤销快照）
+      follow.selBackup = cloneRows(d.rows);
+      follow.selDirty = false;
+    }
+    if (follow.selRow !== ri){
+      follow.selRow = ri;
+      follow.sel = null;
+      beatsPopover.hidden = true;
+      if (typeof setBeatsArming === 'function') setBeatsArming(false);
+    }
+    rowEditBar.hidden = false;
+    renderFollowOverlay();
+  }
+
+  function exitRowSelection(){
+    // 关键：Enter/Esc 提交或取消时，必须结束进行中的拖动，
+    // 否则残留的 endDrag / drag 会继续吃 pointermove，行框跟着鼠标跑
+    if (follow.endDrag && follow.endDrag.pointerId != null &&
+        followOverlay.hasPointerCapture && followOverlay.hasPointerCapture(follow.endDrag.pointerId)){
+      try { followOverlay.releasePointerCapture(follow.endDrag.pointerId); } catch (error) {}
+    }
+    if (follow.drag && follow.drag.pointerId != null &&
+        followOverlay.hasPointerCapture && followOverlay.hasPointerCapture(follow.drag.pointerId)){
+      try { followOverlay.releasePointerCapture(follow.drag.pointerId); } catch (error) {}
+    }
+    follow.endDrag = null;
+    follow.drag = null;
+
+    // 同时结束画布平移（viewport 可能抢到了捕获）
+    viewer.dragging = false;
+    viewer.pointerId = null;
+    viewport.classList.remove('is-panning');
+
+    follow.selRow = null;
+    follow.selBackup = null;
+    follow.selDirty = false;
+    follow.selActivatedId = null;
+    follow.sel = null;
+    if (typeof setBeatsArming === 'function') setBeatsArming(false);
+    beatsPopover.hidden = true;
+    rowEditBar.hidden = true;
+    renderFollowOverlay();
+  }
+
+  // 完成：校验 + 把整段编辑作为一条撤销记录提交，然后退出
+  function confirmRowEdit(){
+    if (follow.selRow == null) return;
+    const pi = viewer.index;
+    const d = pageData(pi);
+    const row = d.rows[follow.selRow];
+    if (!row || rowEffectiveMeasures(row).length === 0){
+      showToast('该区域没有识别到小节，请把范围拖回到包含小节的位置', 'error');
+      return;
+    }
+    if (follow.selDirty && follow.selBackup){
+      follow.undo.push({ page: pi, rows: cloneRows(follow.selBackup) });
+      if (follow.undo.length > 60) follow.undo.shift();
+    }
+    buildSequence();
+    exitRowSelection();
+  }
+
+  // 取消：还原选中前的样子
+  function cancelRowEdit(){
+    if (follow.selRow == null) return;
+    if (follow.selBackup) pageData(viewer.index).rows = cloneRows(follow.selBackup);
+    buildSequence();
+    exitRowSelection();
+  }
+
+  $('#rowEditDone').addEventListener('click', confirmRowEdit);
+  $('#rowEditCancel').addEventListener('click', cancelRowEdit);
+
+  // 删除当前选中的行：先存撤销快照，再由 exitRowSelection 统一重绘浮层
+  $('#rowEditDelete').addEventListener('click', () => {
+    if (follow.selRow == null) return;
+    const pi = viewer.index;
+    const d = pageData(pi);
+    if (!d.rows[follow.selRow]) return;
+    pushRowUndo(pi);
+    d.rows.splice(follow.selRow, 1);
+    buildSequence();
+    exitRowSelection();
+    followEmpty.hidden = d.rows.length > 0;
+    showToast('已删除该行 · Ctrl+Z 可撤销');
+  });
+
+  // 「改某小节拍数」开关：打开后点一个小节改拍数；平时再点本行 = 直接完成
+  const rebBeats = $('#rowEditBeats');
+  const rebLabel = $('#rebLabel');
+  function setBeatsArming(on){
+    follow.beatsArming = !!on;
+    rebBeats.classList.toggle('is-arming', !!on);
+    const text = rebBeats.querySelector('.reb-text');
+    if (text) text.textContent = on ? '请点要改的小节…' : '改某小节拍数';
+    rebBeats.title = on ? '请点要改的小节…' : '改某小节拍数';
+    rebBeats.setAttribute('aria-label', on ? '请点要改的小节' : '改某小节拍数');
+  }
+  rebBeats.addEventListener('click', () => {
+    if (follow.selRow == null) return;
+    setBeatsArming(!follow.beatsArming);
+    if (follow.beatsArming) showToast('请点一下要改拍数的小节');
+  });
+
+  // 「＋新增一行」：识别不出来时的兜底，整页一行
+  $('#addRowBtn').addEventListener('click', () => {
+    const d = pageData(viewer.index);
+    const page = getPage();
+    if (!page) return;
+    if (d.rows.length){
+      showToast('已有识别结果 · 请先点选某一行，再拖它两端的圆点调整');
+      return;
+    }
+    pushRowUndo(viewer.index);
+    d.rows.push({
+      y0: page.height * 0.04, y1: page.height * 0.96,
+      x0: 0, x1: page.width,
+      measures: [{ x0: 0, x1: page.width, beats: null }]
+    });
+    d.ready = true;
+    followEmpty.hidden = true;
+    buildSequence();
+    selectRow(0);
+    showToast('已新增整页一行 · 拖两端圆点调整范围，双击可加小节线');
+  });
+
+  followOverlay.addEventListener('pointerdown', (e) => {
+    if (!follow.active || audio.playing) return;
+    const t = e.target;
+    const page = getPage();
+    if (!page) return;
+
+    // 四边手柄（start/end 横向，top/bottom 竖向）
+    const endG = t.closest ? t.closest('.end-handle') : null;
+    if (endG){
+      const d = pageData(viewer.index);
+      const ri = Number(endG.dataset.row);
+      const row = d.rows[ri];
+      const edge = endG.dataset.edge;
+      follow.endDrag = {
+        ri, edge,
+        pointerId: e.pointerId,
+        orig: { x0: row.x0, x1: row.x1, y0: row.y0, y1: row.y1 },
+        moved: false
+      };
+      try { followOverlay.setPointerCapture(e.pointerId); } catch (error) {}
+      e.preventDefault();
+      return;
+    }
+
+    // 小节线手柄（拖动改动只在内存里，点「完成」才一起提交）
+    if (t.classList && t.classList.contains('handle')){
+      follow.drag = { row: Number(t.dataset.row), m: Number(t.dataset.m), edge: t.dataset.edge, pointerId: e.pointerId, moved: false };      try { followOverlay.setPointerCapture(e.pointerId); } catch (error) {}
+      e.preventDefault();
+      return;
+    }
+
+    // 点行框：选中该行（已选中再点保持选中，不提交）
+    if (t.classList && t.classList.contains('row-box')){
+      const ri = Number(t.dataset.row);
+      const wasSel = follow.selRow === ri;
+      selectRow(ri);
+      if (!wasSel) follow.selActivatedId = e.pointerId; // 首次选中那一下，不弹拍数
+      return;
+    }
+    // 点覆盖层空白：只是结束本次拖动、停在待确认，不提交（由「完成」提交）
+  });
+
+  followOverlay.addEventListener('pointermove', (e) => {
+    if (!follow.active) return;
+    // 丢弃与当前拖动 pointerId 不匹配的事件（防止别的手指/鼠标残留）
+    if (follow.endDrag && e.pointerId !== follow.endDrag.pointerId) return;
+    if (follow.drag && e.pointerId !== follow.drag.pointerId) return;
+    // 已经不在编辑该行（比如 Enter 已提交），丢弃残留拖动
+    if (follow.endDrag && follow.selRow !== follow.endDrag.ri){ follow.endDrag = null; return; }
+    if (follow.drag && follow.selRow == null){ follow.drag = null; return; }
+    const p = overlayPointToImage(e);
+    const page = getPage();
+    if (!page) return;
+
+    // 拖四边手柄（实时预览，夹住不允许交叉 / 不和相邻行重叠）
+    if (follow.endDrag){
+      const d = pageData(viewer.index);
+      const dr = follow.endDrag;
+      const row = d.rows[dr.ri];
+      const prev = dr.ri > 0 ? d.rows[dr.ri - 1] : null;
+      const next = dr.ri < d.rows.length - 1 ? d.rows[dr.ri + 1] : null;
+      const edge = dr.edge;
+      if (edge === 'start'){
+        row.x0 = clamp(p.x, 0, row.x1 - ROW_MIN_W);
+      } else if (edge === 'end'){
+        row.x1 = clamp(p.x, row.x0 + ROW_MIN_W, page.width);
+      } else if (edge === 'top'){
+        const low = prev ? Math.max(0, prev.y1 + 4) : 0;
+        row.y0 = clamp(p.y, low, row.y1 - ROW_MIN_H);
+      } else { // bottom
+        const high = next ? Math.min(page.height, next.y0 - 4) : page.height;
+        row.y1 = clamp(p.y, row.y0 + ROW_MIN_H, high);
+      }
+      dr.moved = true;
+      follow.selDirty = true;
+      renderFollowOverlay();
+      return;
+    }
+
+    // 拖小节线（仅预览，标脏，完成时统一提交）
+    if (follow.drag){
+      const d = pageData(viewer.index);
+      const m = d.rows[follow.drag.row].measures[follow.drag.m];
+      m[follow.drag.edge] = clamp(p.x, 0, page.width);
+      follow.drag.moved = true;
+      follow.selDirty = true;
+      renderFollowOverlay();
+    }
+  });
+
+  function endOverlayDrag(e){
+    if (follow.endDrag && (!e || e.pointerId === follow.endDrag.pointerId)){
+      if (follow.endDrag.moved) follow.selDirty = true;
+      if (follow.endDrag.pointerId != null &&
+          followOverlay.hasPointerCapture && followOverlay.hasPointerCapture(follow.endDrag.pointerId)){
+        try { followOverlay.releasePointerCapture(follow.endDrag.pointerId); } catch (error) {}
+      }
+      follow.endDrag = null;
+      renderFollowOverlay();
+      return;
+    }
+    if (follow.drag && (!e || e.pointerId === follow.drag.pointerId)){
+      if (follow.drag.pointerId != null &&
+          followOverlay.hasPointerCapture && followOverlay.hasPointerCapture(follow.drag.pointerId)){
+        try { followOverlay.releasePointerCapture(follow.drag.pointerId); } catch (error) {}
+      }
+      follow.drag = null;
+      renderFollowOverlay();
+    }
+  }
+
+  followOverlay.addEventListener('pointerup', endOverlayDrag);
+  followOverlay.addEventListener('pointercancel', endOverlayDrag);
+  followOverlay.addEventListener('lostpointercapture', endOverlayDrag);
+
+  // 双击小节线附近 = 删线；双击小节内部 = 加小节线（只在已选中的行里生效）
+  followOverlay.addEventListener('dblclick', (e) => {
+    if (!follow.active || audio.playing) return;
+    if (follow.selRow == null) return;
+    const p = overlayPointToImage(e);
+    const d = pageData(viewer.index);
+    const ri = follow.selRow;
+    const row = d.rows[ri];
+    if (p.y < row.y0 || p.y > row.y1) return;
+    const xs = [];
+    row.measures.forEach((m, mi) => {
+      if (measureInRow(row, m)) xs.push({ x: m.x0, mi, edge: 'x0' });
+    });
+    const lastM = row.measures[row.measures.length - 1];
+    if (lastM && measureInRow(row, lastM)) xs.push({ x: lastM.x1, mi: row.measures.length - 1, edge: 'x1' });
+    const near = xs.find(a => Math.abs(a.x - p.x) < 12 / viewer.scale);
+    if (near){
+      if (near.edge === 'x0' && near.mi > 0){
+        row.measures[near.mi - 1].x1 = row.measures[near.mi].x1;
+        row.measures.splice(near.mi, 1);
+      } else if (near.edge === 'x1' && near.mi < row.measures.length - 1){
+        row.measures[near.mi].x1 = row.measures[near.mi + 1].x1;
+        row.measures.splice(near.mi + 1, 1);
+      } else { return; }
+    } else {
+      const xLo = row.x0 != null ? row.x0 : 0;
+      const xHi = row.x1 != null ? row.x1 : getPage().width;
+      if (p.x <= xLo || p.x >= xHi) return;
+      for (let mi = 0; mi < row.measures.length; mi++){
+        const m = row.measures[mi];
+        if (!measureInRow(row, m)) continue;
+        if (p.x > m.x0 && p.x < m.x1){
+          row.measures.splice(mi + 1, 0, { x0: p.x, x1: m.x1, beats: m.beats });
+          m.x1 = p.x;
+          break;
+        }
+      }
+    }
+    follow.selDirty = true; // 增删小节线也算改动，完成时统一提交
+    renderFollowOverlay();
+  });
+
+  // 点击：松开手柄后再点一下 = 结束本次拖动（停在待确认，不提交）；
+  // 先点「改某小节拍数」再点小节 = 改拍数。真正提交只认工具条「完成」/ Enter。
+  followOverlay.addEventListener('click', (e) => {
+    if (!follow.active || audio.playing) return;
+    // 选中行的那一下点击只负责选中，不弹拍数
+    if (follow.selActivatedId != null && e.pointerId === follow.selActivatedId){
+      follow.selActivatedId = null;
+      return;
+    }
+    if (e.target.closest && e.target.closest('.end-handle')) return;
+    if (e.target.classList && e.target.classList.contains('handle')) return;
+    if (follow.selRow == null) return;
+    const p = overlayPointToImage(e);
+    const d = pageData(viewer.index);
+    const ri = follow.selRow;
+    const row = d.rows[ri];
+    if (!row) return;
+
+    // 找落点是否在某个小节里
+    let hitMi = -1;
+    if (p.y >= row.y0 && p.y <= row.y1){
+      for (let mi = 0; mi < row.measures.length; mi++){
+        const m = row.measures[mi];
+        if (!measureInRow(row, m)) continue;
+        if (p.x >= m.x0 && p.x <= m.x1){ hitMi = mi; break; }
+      }
+    }
+
+    if (follow.beatsArming){
+      // 改拍数模式：点到小节才弹；点别处取消改拍数，仍停在待确认
+      if (hitMi >= 0){
+        follow.sel = { row: ri, m: hitMi };
+        setBeatsArming(false);
+        showBeatsPopover(e.clientX, e.clientY, row.measures[hitMi]);
+      } else {
+        setBeatsArming(false);
+      }
+      return;
+    }
+    // 普通点击：只是结束这次拖动 / 关掉拍数框，不提交
+    beatsPopover.hidden = true;
+  });
+
+  function showBeatsPopover(clientX, clientY, m){
+    bpValue.textContent = (m.beats == null) ? `${METERS[audio.meter].beats}（默认）` : String(m.beats);
+    const paneRect = document.querySelector('.score-pane').getBoundingClientRect();
+    beatsPopover.style.left = (clientX - paneRect.left) + 'px';
+    beatsPopover.style.top = (clientY - paneRect.top - 10) + 'px';
+    beatsPopover.hidden = false;
+  }
+  $('#bpmMinus').addEventListener('click', () => {
+    if (!follow.sel) return;
+    const d = pageData(viewer.index);
+    const m = d.rows[follow.sel.row].measures[follow.sel.m];
+    const cur = (m.beats == null) ? METERS[audio.meter].beats : m.beats;
+    m.beats = clamp(cur - 1, 1, 16);
+    follow.selDirty = true;
+    bpValue.textContent = String(m.beats);
+    renderFollowOverlay();
+  });
+  $('#bpmPlus').addEventListener('click', () => {
+    if (!follow.sel) return;
+    const d = pageData(viewer.index);
+    const m = d.rows[follow.sel.row].measures[follow.sel.m];
+    const cur = (m.beats == null) ? METERS[audio.meter].beats : m.beats;
+    m.beats = clamp(cur + 1, 1, 16);
+    follow.selDirty = true;
+    bpValue.textContent = String(m.beats);
+    renderFollowOverlay();
+  });
+  $('#bpReset').addEventListener('click', () => {
+    if (!follow.sel) return;
+    const d = pageData(viewer.index);
+    d.rows[follow.sel.row].measures[follow.sel.m].beats = null;
+    follow.selDirty = true;
+    bpValue.textContent = `${METERS[audio.meter].beats}（默认）`;
+    renderFollowOverlay();
+  });
+
+  /* 主模式切换：拼贴 / 动态 */
+  function setRootMode(mode){
+    if (!viewer.pages.length){ showToast('先上传乐谱图片'); return; }
+    const dyn = mode === 'dynamic';
+    if (follow.active === dyn) return;
+    follow.active = dyn;
+    app.classList.toggle('follow-mode', dyn);
+    modePill.classList.toggle('is-dynamic', dyn);
+    modePill.setAttribute('aria-checked', String(dyn));
+    followToolsBar.hidden = !dyn;
+    beatsPopover.hidden = true;
+
+    if (dyn){
+      if (viewer.displayMode !== 'single') setDisplayMode('single', { index: viewer.index });
+      const allReady = viewer.pages.every((p, k) => pageData(k).ready);
+      if (!allReady){
+        // 先把当前页识别出来（detectAllPagesForFollow 会继续识别其余页）
+        detectAllPagesForFollow();
+      } else {
+        // 已经识别过：恢复到离开时的进度，不重头、不重新识别
+        buildSequence();
+        const e = follow.seq[follow.pos];
+        if (e){
+          followEmpty.hidden = pageData(e.page).rows.length > 0;
+          restoreCurrentPosition();
+        }
+      }
+      renderFollowOverlay();
+      showStageHint('动态模式：按空格开始跟随 · 停止后点一行，拖两端圆点调整范围');
+    } else {
+      beatsPopover.hidden = true;
+      if (follow.selRow != null) cancelRowEdit();
+      $('#rowEditBar').hidden = true;
+      renderFollowOverlay();
+      followEmpty.hidden = true;
+      if (viewer.pages.length > 1) setDisplayMode('free');
+      showStageHint('已切回拼贴模式 · 可自由拖动摆放多页');
+    }
+    updatePageUI();
+  }
+
+  modePill.addEventListener('click', () => {
+    setRootMode(modePill.classList.contains('is-dynamic') ? 'collage' : 'dynamic');
+  });
+  modePill.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'End' || e.key === 'Enter' || e.key === ' '){
+      e.preventDefault();
+      setRootMode('dynamic');
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'Home'){
+      e.preventDefault();
+      setRootMode('collage');
+    }
+  });
+
+  reDetectBtn.addEventListener('click', () => runDetectionForPage(viewer.index));
+
+  /* 回到当前播放位置（停止后浏览时，一键回到当前小节） */
+  /* 把视口瞬时带回当前播放位置（含小节内的小数进度） */
+  async function restoreCurrentPosition(){
+    const e = follow.seq[follow.pos];
+    if (!e) return;
+    if (e.page !== viewer.index) await showPage(e.page, false);
+    const d = pageData(e.page);
+    const row = d.rows[e.row];
+    const m = row.measures[e.m];
+    const frac = (follow.globalBeat - e.startBeat) / e.beats;
+    const px = m.x0 + (m.x1 - m.x0) * clamp(frac, 0, 1);
+    centerOnPoint(px, (row.y0 + row.y1) / 2);
+    renderFollowOverlay();
+  }
+
+  resumePosBtn.addEventListener('click', () => restoreCurrentPosition());
+
+  clearRowsBtn.addEventListener('click', () => {
+    const d = pageData(viewer.index);
+    d.rows = [];
+    d.ready = true;
+    follow.undo = follow.undo.filter(u => u.page !== viewer.index);
+    follow.selRow = null; follow.selBackup = null; follow.endDrag = null; follow.sel = null;
+    $('#rowEditBar').hidden = true;
+    buildSequence();
+    follow.globalBeat = 0;
+    renderFollowOverlay();
+    followEmpty.hidden = false;
+    beatsPopover.hidden = true;
+    showToast('本页已清空 · 可重新识别，或点「＋新增一行」手动创建');
+  });
+
+  /* ── Init ──────────────────────────────────────────────── */
+  updateBpmUI();
+  renderBeatDots();
+  setVolume(65);
+  syncPlayUI();
+})();
+</script>
+</body>
+</html>
